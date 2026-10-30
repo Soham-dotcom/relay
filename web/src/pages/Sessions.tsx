@@ -17,7 +17,7 @@ export default function SessionsPage() {
           <p className="text-sm text-slate-600">Everything discussed, decided and handed over, with every open item followed until it closes.</p>
         </div>
         <div className="flex items-center gap-2">
-          <select aria-label="Filter by kind" className={`${inputCls} w-auto`} value={kind} onChange={(e) => setKind(e.target.value as SessionKind | '')}>
+          <select aria-label="Filter by kind" className={`${inputCls} !w-auto`} value={kind} onChange={(e) => setKind(e.target.value as SessionKind | '')}>
             <option value="">All</option>
             <option value="MEETING">Meetings</option>
             <option value="TRANSFER">Work transfers</option>

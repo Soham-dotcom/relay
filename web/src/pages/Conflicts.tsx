@@ -17,7 +17,7 @@ export default function ConflictsPage() {
             When a new decision contradicts an earlier one, AI flags it here, so nobody keeps working from a decision that has quietly been reversed.
           </p>
         </div>
-        <select aria-label="Status" className={`${inputCls} w-auto`} value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+        <select aria-label="Status" className={`${inputCls} !w-auto`} value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
           <option value="OPEN">Open</option>
           <option value="RESOLVED">Resolved</option>
           <option value="DISMISSED">Dismissed</option>

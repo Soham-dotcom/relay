@@ -58,18 +58,18 @@ export function ItemRow({ item, people, showSession }: { item: ActionItem; peopl
           </div>
           {item.outcome && <p className="mt-1 text-xs text-slate-600"><b>Outcome:</b> {item.outcome}</p>}
         </div>
-        <select aria-label="Owner" className={`${inputCls} w-36`} value={item.ownerId ?? ''} onChange={(e) => patch.mutate({ ownerId: e.target.value || null })}>
+        <select aria-label="Owner" className={`${inputCls} !w-36`} value={item.ownerId ?? ''} onChange={(e) => patch.mutate({ ownerId: e.target.value || null })}>
           <option value="">Unassigned</option>
           {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <input
           aria-label="Due date"
           type="date"
-          className={`${inputCls} w-36 ${overdue ? 'border-red-400 text-red-700' : ''}`}
+          className={`${inputCls} !w-36 ${overdue ? 'border-red-400 text-red-700' : ''}`}
           value={item.dueDate?.slice(0, 10) ?? ''}
           onChange={(e) => patch.mutate({ dueDate: e.target.value || null })}
         />
-        <select aria-label="Status" className={`${inputCls} w-32`} value={closingAs ?? item.status} onChange={(e) => onStatus(e.target.value as ItemStatus)}>
+        <select aria-label="Status" className={`${inputCls} !w-32`} value={closingAs ?? item.status} onChange={(e) => onStatus(e.target.value as ItemStatus)}>
           {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ').toLowerCase()}</option>)}
         </select>
         <Button variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>{open ? 'Hide' : 'History'}</Button>
@@ -145,11 +145,11 @@ export function NewItemForm({ sessionId, people }: { sessionId: string; people: 
     >
       <div className="flex flex-wrap gap-2">
         <input aria-label="New item title" className={`${inputCls} min-w-[200px] flex-1`} placeholder="Add an action item…" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required maxLength={300} />
-        <select aria-label="New item owner" className={`${inputCls} w-36`} value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>
+        <select aria-label="New item owner" className={`${inputCls} !w-36`} value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>
           <option value="">Unassigned</option>
           {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <input aria-label="New item due date" type="date" className={`${inputCls} w-36`} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} />
+        <input aria-label="New item due date" type="date" className={`${inputCls} !w-36`} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} />
         <Button type="submit" variant="secondary" busy={add.isPending}>Add</Button>
       </div>
       <ErrorBox error={add.error} />

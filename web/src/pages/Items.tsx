@@ -47,14 +47,14 @@ export default function ItemsPage() {
         title="Items"
         actions={
           <>
-            <select aria-label="Show" className={`${inputCls} w-auto`} value={filter.view} onChange={(e) => setFilter({ ...filter, view: e.target.value })}>
+            <select aria-label="Show" className={`${inputCls} !w-auto`} value={filter.view} onChange={(e) => setFilter({ ...filter, view: e.target.value })}>
               <option value="open">Open</option>
               <option value="overdue">Overdue</option>
               <option value="DONE">Done</option>
               <option value="DROPPED">Dropped</option>
               <option value="all">All</option>
             </select>
-            <select aria-label="Owner" className={`${inputCls} w-auto`} value={filter.ownerId} onChange={(e) => setFilter({ ...filter, ownerId: e.target.value })}>
+            <select aria-label="Owner" className={`${inputCls} !w-auto`} value={filter.ownerId} onChange={(e) => setFilter({ ...filter, ownerId: e.target.value })}>
               <option value="">Any owner</option>
               <option value="none">Unassigned</option>
               {people.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

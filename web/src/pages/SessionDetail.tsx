@@ -73,7 +73,7 @@ function Header({ s }: { s: SessionDetail }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <select aria-label="Session status" className={`${inputCls} w-auto`} value={s.status} onChange={(e) => update.mutate(e.target.value as SessionStatus)}>
+          <select aria-label="Session status" className={`${inputCls} !w-auto`} value={s.status} onChange={(e) => update.mutate(e.target.value as SessionStatus)}>
             <option value="PLANNED">Planned</option>
             <option value="HELD">Held</option>
             <option value="CLOSED">Closed</option>
@@ -177,11 +177,11 @@ function RecapCard({ s }: { s: SessionDetail }) {
               <div key={i} className="mt-2 rounded border border-slate-200 bg-white p-2">
                 <div className="flex flex-wrap gap-2">
                   <input aria-label={`Item ${i + 1} title`} className={`${inputCls} min-w-[180px] flex-1`} value={a.title} onChange={(e) => upd((d) => void (d.actionItems[i].title = e.target.value))} />
-                  <select aria-label={`Item ${i + 1} owner`} className={`${inputCls} w-36`} value={a.ownerId ?? ''} onChange={(e) => upd((d) => void (d.actionItems[i].ownerId = e.target.value || null))}>
+                  <select aria-label={`Item ${i + 1} owner`} className={`${inputCls} !w-36`} value={a.ownerId ?? ''} onChange={(e) => upd((d) => void (d.actionItems[i].ownerId = e.target.value || null))}>
                     <option value="">Unassigned</option>
                     {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
-                  <input aria-label={`Item ${i + 1} due`} type="date" className={`${inputCls} w-36`} value={a.dueDate ?? ''} onChange={(e) => upd((d) => void (d.actionItems[i].dueDate = e.target.value || null))} />
+                  <input aria-label={`Item ${i + 1} due`} type="date" className={`${inputCls} !w-36`} value={a.dueDate ?? ''} onChange={(e) => upd((d) => void (d.actionItems[i].dueDate = e.target.value || null))} />
                   <Button variant="ghost" aria-label="Remove item" onClick={() => upd((d) => void d.actionItems.splice(i, 1))}>✕</Button>
                 </div>
                 {a.suggestedOwner && !a.ownerId && <p className="mt-1 text-xs text-amber-700">AI named "{a.suggestedOwner}", who is not a participant. Pick an owner.</p>}
@@ -246,7 +246,7 @@ function CarryForward({ s }: { s: SessionDetail }) {
   const targets = (sessions.data ?? []).filter((x) => x.id !== s.id && x.status !== 'CLOSED');
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select aria-label="Carry forward to" className={`${inputCls} w-52`} value={to} onChange={(e) => setTo(e.target.value)}>
+      <select aria-label="Carry forward to" className={`${inputCls} !w-52`} value={to} onChange={(e) => setTo(e.target.value)}>
         <option value="">Carry {open} open item(s) to…</option>
         {targets.map((t) => <option key={t.id} value={t.id}>{t.title} ({fmtDate(t.scheduledAt)})</option>)}
       </select>
@@ -272,7 +272,7 @@ function ParticipantsCard({ s }: { s: SessionDetail }) {
               {p.person.name}
               <span className="block text-xs text-slate-500">{p.person.role}</span>
             </span>
-            <select aria-label={`${p.person.name} attendance`} className={`${inputCls} w-28 ${p.attendance === 'MISSED' ? 'text-red-700' : ''}`} value={p.attendance} onChange={(e) => set.mutate({ personId: p.personId, attendance: e.target.value as Attendance })}>
+            <select aria-label={`${p.person.name} attendance`} className={`${inputCls} !w-28 ${p.attendance === 'MISSED' ? 'text-red-700' : ''}`} value={p.attendance} onChange={(e) => set.mutate({ personId: p.personId, attendance: e.target.value as Attendance })}>
               <option value="INVITED">Invited</option>
               <option value="ATTENDED">Attended</option>
               <option value="MISSED">Missed</option>
