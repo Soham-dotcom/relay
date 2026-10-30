@@ -91,7 +91,7 @@ Try it: sign in as **Aisha** (Payments: 6 sessions, 14 docs), **Kavya** (Support
 |---|---|
 | Backend | Node.js 22, TypeScript, Express 5, zod validation |
 | Database | PostgreSQL via Prisma ORM (Neon in production, embedded Postgres locally) |
-| AI | Google Gemini (`gemini-2.5-flash` for text, `gemini-embedding-001` for embeddings) behind a small provider interface |
+| AI | Google Gemini (`gemini-flash-lite-latest` for text, `gemini-embedding-001` for embeddings) behind a small provider interface |
 | Logging | pino (JSON) to stdout and `logs/app.log`, pino-http access logs |
 | Frontend | React 19, Vite, Tailwind CSS 4, TanStack Query, React Router |
 | Tests | Vitest + Supertest, real Postgres, fake AI provider |
@@ -139,7 +139,7 @@ Nine access-control tests check: no token → 401; a private session is a 404 fo
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | _(empty)_ | Free key from https://aistudio.google.com/apikey. Empty = AI off, app still works |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Text model for recap, brief, linking, conflicts |
+| `GEMINI_MODEL` | `gemini-flash-lite-latest` | Text model for recap, brief, linking, conflicts, Ask. Chosen for speed (~2.5 s per call); `gemini-2.5-flash` is no longer offered to new API projects |
 | `GEMINI_EMBED_MODEL` | `gemini-embedding-001` | Embeddings (768 dims) for retrieval |
 | `AI_TIMEOUT_MS` | `25000` | Per-call timeout |
 

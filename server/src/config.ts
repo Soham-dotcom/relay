@@ -7,7 +7,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   // Optional on purpose: without a key the app still works, AI features report "unavailable".
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
+  GEMINI_MODEL: z.string().default('gemini-flash-lite-latest'),
   GEMINI_EMBED_MODEL: z.string().default('gemini-embedding-001'),
   AI_TIMEOUT_MS: z.coerce.number().int().positive().default(25000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
