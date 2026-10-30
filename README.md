@@ -2,7 +2,7 @@
 
 **AI-powered knowledge and task hand-over for teams.** Relay captures what was discussed and decided in a meeting or a work transfer, hands that context to the right people, and follows every action item until it is closed with an outcome.
 
-> Live demo: _add your Render URL here_ · The free tier sleeps when idle, so the first request can take ~30 s.
+> **Live demo: https://relay-h9qf.onrender.com** (seeded with a demo team; no login needed). The free tier sleeps when idle, so the first request can take ~30-50 s.
 
 Teams lose context every time work changes hands: someone misses a meeting, a colleague goes on leave, last week's action item never reaches this week's agenda. Relay is built around those three moments.
 

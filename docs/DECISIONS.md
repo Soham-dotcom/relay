@@ -61,3 +61,8 @@ Each entry: what was chosen, why, what was rejected, and the trade-off accepted.
 ### D13. Embedded Postgres for local dev and tests
 - **Why:** Docker wasn't available; `embedded-postgres` runs a real Postgres from npm, so tests use the same engine as production.
 - **Rejected:** SQLite locally (different SQL and Prisma behaviour from production); mocking Prisma (tests would prove little).
+
+### D14. Render in Ohio, next to Neon (us-east-2); direct (non-pooled) Neon URL
+- **Why:** the app makes several DB queries per request; putting app and DB in the same AWS region keeps each one ~1 ms instead of ~200 ms across continents. Prisma migrations need a direct connection, and the free tier's traffic doesn't need PgBouncer pooling.
+- **Rejected:** Singapore (closer to Mumbai users, but every query would cross the Pacific to the database).
+- **Trade-off:** users in India see ~250 ms extra on the page request itself; still far better than paying it on every query.
