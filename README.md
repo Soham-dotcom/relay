@@ -1,8 +1,18 @@
 # Relay
 
+[![CI](https://github.com/Soham-dotcom/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/Soham-dotcom/relay/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/demo-live-0f766e)](https://relay-h9qf.onrender.com)
+![Node](https://img.shields.io/badge/node-22-339933)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **AI-powered knowledge and task hand-over for teams.** Relay captures what was discussed and decided in a meeting or a work transfer, hands that context to the right people, and follows every action item until it is closed with an outcome.
 
 > **Live demo: https://relay-h9qf.onrender.com**. Pick a demo person on the sign-in screen (no password) and switch people to see the access rules work. The free tier sleeps when idle, so the first request can take ~30-50 s.
+
+**Contents:** [Features](#features) · [Using Relay](#using-relay-a-5-minute-tour) · [Special feature](#-special-feature-decision-conflict-check) · [Access control](#access-control-the-right-context-for-the-right-people) · [Tech stack](#tech-stack) · [Run locally](#run-it-locally) · [AI configuration](#ai-configuration) · [Data](#data) · [Logging](#logging) · [API](#api) · [Project structure](#project-structure) · [Approach](#approach) · [Assumptions](#assumptions) · [Limitations](#known-limitations) · [Deploy](#deploy-render--neon) · [Contributing](#contributing)
+
+## Features
 
 Teams lose context every time work changes hands: someone misses a meeting, a colleague goes on leave, last week's action item never reaches this week's agenda. Relay is built around those three moments.
 
@@ -15,6 +25,21 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 | Find the background | **Knowledge base**: team documents + every held meeting. AI links items and decisions to the documents that help, and says why |
 | ★ Avoid acting on a reversed decision | **Decision conflict check** (special feature, below) |
 | Share the right context with the right people | **Access control**: every session and document is 🔒 Private, 👥 Team or 🌐 Organisation. The server enforces it on every query, and the AI respects it too (below) |
+
+## Using Relay: a 5-minute tour
+
+1. **Sign in** on the start screen as **Priya Sharma** (Payments lead). No password: it's a demo picker that issues a real signed token.
+2. **Sessions** lists the meetings and work transfers Priya can see. Each card shows type, status, visibility (🔒 / 👥 / 🌐), date, participants and how many items are still open.
+3. Open **Payments weekly sync · 28 Oct**. The decision *"Move the launch to 15 November"* carries a red **conflict** box: it contradicts *"Launch on 1 November"* from 14 Oct. Linked knowledge documents sit under each decision.
+4. Open the planned **Payments weekly sync · 4 Nov**:
+   - Paste messy notes into **Summary & AI recap**, e.g. *"vikram will run k6 by thursday. we decided to switch the gateway to Cashfree. priya gets cashfree keys by tomorrow."*
+   - Click **✦ Generate recap with AI**. Review the draft: owners, due dates and supporting quotes. Items already open are marked **"Already open"**, so they're updated instead of duplicated.
+   - **Save recap.** Relay links the items to the knowledge base and runs the conflict check; "switch to Cashfree" is flagged against the earlier "use Razorpay".
+5. In the same session, pick a person under **Catch-up brief** (e.g. someone who missed it) and click **✦ Brief**: their actions, key decisions, other open items and what to watch out for.
+6. **Action items** shows every item you can see, with counters (open, overdue, carried 2+ times, no owner). Change owner, due date or status inline. Closing asks for the **outcome**; **History** shows the full timeline.
+7. **Rahul on leave: webhook work to Priya** is a 🔒 private work transfer. **Reassign all of Rahul's open items to Priya** hands everything over in one click, recorded in each item's history.
+8. **Conflicts** lists open conflicts side by side with the AI's reason. **Mark resolved** (with a note) or **Not a conflict**.
+9. **Switch user** (top right) → **Kavya Nair** (Support). She sees only the Support triage and the two org-wide documents. Payments meetings, Rahul's private notes and the private hand-over are invisible. Opening their URLs returns "not found".
 
 ## ★ Special feature: decision conflict check
 
@@ -182,6 +207,40 @@ All endpoints are under `/api`. Errors always look like `{ "error": { "code", "m
 | `GET/POST /knowledge`, `DELETE /knowledge/:id` | Knowledge base |
 | `GET /conflicts`, `PATCH /conflicts/:id` | List / resolve or dismiss |
 
+## Project structure
+
+```
+relay/
+├── server/                     Express API (TypeScript)
+│   ├── prisma/
+│   │   ├── schema.prisma       Data model (sessions, items, history, teams, visibility, knowledge, conflicts)
+│   │   ├── migrations/         SQL migrations, applied on start with `prisma migrate deploy`
+│   │   └── seed.ts             Demo data: two teams, 6 sessions, 8 documents, 1 conflict
+│   ├── src/
+│   │   ├── index.ts            Starts the server, graceful shutdown
+│   │   ├── app.ts              Express app: request ID, access log, routes, serves the built UI
+│   │   ├── routes.ts           HTTP layer: zod validation, auth, access guards → services
+│   │   ├── access.ts           All visibility rules: query filters, guards, audiences
+│   │   ├── auth.ts             JWT issue/verify middleware
+│   │   ├── services/           Business rules: sessions, items, recap, brief, knowledge, conflicts
+│   │   ├── ai/                 Provider interface (Gemini), client (timeout, validation, retry, logging), prompts + schemas
+│   │   ├── lib/similarity.ts   Cosine similarity and keyword fallback for retrieval
+│   │   ├── logger.ts           pino to stdout + file, request/user ID on every line, redaction
+│   │   ├── errors.ts           One error shape for every failure
+│   │   └── config.ts           Environment validated at boot
+│   ├── test/                   Vitest + Supertest: unit, API and access-control tests (fake AI)
+│   └── scripts/                Local embedded Postgres, smoke test
+├── web/                        React + Vite + Tailwind UI
+│   └── src/
+│       ├── pages/              Sign-in, Sessions, Session detail, Action items, Knowledge, Conflicts
+│       ├── components/         Item row with inline editing and history
+│       ├── api.ts              Typed API client (token, errors)
+│       └── ui.tsx              Shared UI pieces (buttons, badges, visibility picker, modal)
+├── docs/                       ARCHITECTURE.md, DECISIONS.md (why each choice was made)
+├── .github/workflows/ci.yml    CI: typecheck, tests against Postgres, web build
+└── render.yaml                 One-service Render blueprint
+```
+
 ## Approach
 
 1. **Model the hand-over, not just the meeting.** A work transfer is the same kind of record as a meeting (one `Session` table with a `kind`), so carry-forward, briefs, history and conflicts work for both with no duplicate code.
@@ -218,3 +277,11 @@ Layout: `server/src/routes.ts` (HTTP + validation) → `server/src/services/*` (
 2. **Render:** New → Blueprint → pick this repo. `render.yaml` defines one web service. Set `DATABASE_URL` (Neon) and `GEMINI_API_KEY`; Render generates `JWT_SECRET` (required when `NODE_ENV=production`).
 3. The start command runs `prisma migrate deploy` and then the server. To load the demo data once, run from your machine: `DATABASE_URL=<neon url> npm run db:seed --prefix server`.
 4. Health check: `GET /api/health`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, code style and the checks a change must pass. Security issues: see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © 2026 Soham Budhewar

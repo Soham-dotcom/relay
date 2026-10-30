@@ -52,3 +52,15 @@ Session.previousId → Session (chain of follow-ups)
 ## Deployment
 
 One Render web service: build web → build server; `npm start` runs `prisma migrate deploy` then Node. Express serves `web/dist` and falls back to `index.html` for client routes. Postgres on Neon. CI on GitHub Actions runs typecheck, tests (Postgres service container) and the web build.
+
+## Access control
+
+```
+request ─► request-id ─► requireAuth (JWT → viewer + teams, re-read from DB)
+         ─► route guard (assertSessionVisible / Item / Doc / Conflict → 404 + access.denied log)
+         ─► service query AND sessionWhere / docWhere / itemWhere (viewer)
+         ─► AI input built only from records whose audience covers the result's audience
+```
+
+- `server/src/access.ts` holds every rule: Prisma filters for queries, guards for by-id routes, and audiences (sets of people) for AI combinations.
+- Links and conflicts are created only when the other record's audience covers the source session's audience; since visibility is fixed at creation, reading them later needs no extra filter. Org-wide docs still filter their "linked to" list per viewer.
