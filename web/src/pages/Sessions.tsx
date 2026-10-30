@@ -1,19 +1,40 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Person, type SessionKind, type SessionSummary, type Visibility } from '../api';
-import { Badge, Button, Empty, ErrorBox, Field, inputCls, Loading, Modal, StatusBadge, VisibilityBadge, VisibilityPicker, fmtDate } from '../ui';
+import { api, type ActionItem, type Conflict, type Person, type SessionKind, type SessionSummary, type Visibility } from '../api';
+import {
+  AvatarStack,
+  Badge,
+  Button,
+  Empty,
+  ErrorBox,
+  Field,
+  inputCls,
+  isOverdue,
+  Loading,
+  Modal,
+  Stat,
+  StatusBadge,
+  VisibilityBadge,
+  VisibilityPicker,
+  fmtDate,
+} from '../ui';
 import { useMe } from '../App';
 
 export default function SessionsPage() {
   const [kind, setKind] = useState<'' | SessionKind>('');
   const [creating, setCreating] = useState(false);
+  const me = useMe().data;
   const sessions = useQuery({ queryKey: ['sessions', kind], queryFn: () => api<SessionSummary[]>(`/sessions${kind ? `?kind=${kind}` : ''}`) });
+  const open = useQuery({ queryKey: ['items', 'stats'], queryFn: () => api<ActionItem[]>('/items?open=true') });
+  const conflicts = useQuery({ queryKey: ['conflicts', 'OPEN'], queryFn: () => api<Conflict[]>('/conflicts?status=OPEN') });
+  const mine = open.data?.filter((i) => i.ownerId === me?.id) ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
+          <p className="text-sm text-slate-500">Hi {me?.name.split(' ')[0]} 👋</p>
           <h1 className="text-xl font-semibold text-slate-900">Meetings & work transfers</h1>
           <p className="text-sm text-slate-600">Everything discussed, decided and handed over, with every open item followed until it closes.</p>
         </div>
@@ -27,25 +48,50 @@ export default function SessionsPage() {
         </div>
       </div>
 
+      {open.data && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Link to="/items" className="rounded-lg transition hover:shadow-sm">
+            <Stat label="My open items" value={mine.length} tone="text-teal-700" hint="Open items you own" />
+          </Link>
+          <Link to="/items" className="rounded-lg transition hover:shadow-sm">
+            <Stat label="Open items you can see" value={open.data.length} />
+          </Link>
+          <Link to="/items" className="rounded-lg transition hover:shadow-sm">
+            <Stat label="Overdue" value={open.data.filter((i) => isOverdue(i.dueDate, i.status)).length} tone="text-red-700" />
+          </Link>
+          <Link to="/conflicts" className="rounded-lg transition hover:shadow-sm">
+            <Stat label="Decision conflicts" value={conflicts.data?.length ?? 0} tone="text-orange-700" hint="Open conflicts between decisions" />
+          </Link>
+        </div>
+      )}
+
       {sessions.isLoading && <Loading />}
       <ErrorBox error={sessions.error} />
       {sessions.data?.length === 0 && <Empty>No sessions yet. Create the first meeting or work transfer.</Empty>}
 
-      <ul className="grid gap-3">
-        {sessions.data?.map((s) => (
-          <li key={s.id}>
-            <Link to={`/sessions/${s.id}`} className="block rounded-lg border border-slate-200 bg-white p-4 transition hover:border-teal-400 hover:shadow-sm">
-              <div className="flex flex-wrap items-center gap-2">
+      <ul className="grid gap-3 md:grid-cols-2">
+        {sessions.data?.map((s, i) => (
+          <li key={s.id} className="animate-rise" style={{ animationDelay: `${i * 30}ms` }}>
+            <Link
+              to={`/sessions/${s.id}`}
+              className={`group flex h-full flex-col rounded-lg border border-l-4 border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-md ${
+                s.kind === 'TRANSFER' ? 'border-l-violet-500' : s.status === 'PLANNED' ? 'border-l-sky-500' : 'border-l-teal-600'
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Badge tone={s.kind === 'TRANSFER' ? 'bg-violet-50 text-violet-700 ring-violet-200' : undefined}>{s.kind === 'TRANSFER' ? 'Work transfer' : 'Meeting'}</Badge>
                 <StatusBadge status={s.status} />
                 <VisibilityBadge visibility={s.visibility} team={s.team} />
-                <span className="text-sm text-slate-500">{fmtDate(s.scheduledAt)}</span>
+                <span className="ml-auto text-xs text-slate-500">{fmtDate(s.scheduledAt)}</span>
               </div>
-              <h2 className="mt-1.5 font-medium text-slate-900">{s.title}</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                {s.participants.map((p) => p.person.name.split(' ')[0]).join(', ') || 'No participants'} · {s._count.decisions} decisions · {s._count.items} items
-                {s.openItems > 0 && <b className="ml-1 text-amber-700">· {s.openItems} open</b>}
-              </p>
+              <h2 className="mt-2 font-medium text-slate-900 group-hover:text-teal-800">{s.title}</h2>
+              <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3 text-xs text-slate-600">
+                <AvatarStack names={s.participants.map((p) => p.person.name)} />
+                <span>
+                  {s._count.decisions} decisions · {s._count.items} items
+                  {s.openItems > 0 && <b className="ml-1 text-amber-700">· {s.openItems} open</b>}
+                </span>
+              </div>
             </Link>
           </li>
         ))}

@@ -8,7 +8,7 @@ import ItemsPage from './pages/Items';
 import KnowledgePage from './pages/Knowledge';
 import ConflictsPage from './pages/Conflicts';
 import SignIn from './pages/SignIn';
-import { Loading } from './ui';
+import { Avatar, Loading } from './ui';
 
 export default function App() {
   const qc = useQueryClient();
@@ -46,7 +46,7 @@ function Shell() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <NavLink to="/" className="flex items-center gap-2 font-semibold text-slate-900">
             <img src="/favicon.svg" alt="" className="h-6 w-6" />
@@ -70,7 +70,8 @@ function Shell() {
               AI: {health.data ? (health.data.ai === 'configured' ? <b className="text-emerald-700">on</b> : <b className="text-amber-700">off (fallback)</b>) : '…'}
             </span>
             {me.data && (
-              <span className="flex items-center gap-2 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-slate-700">
+              <span className="flex items-center gap-2 rounded-full bg-slate-100 py-1 pl-1 pr-1 text-slate-700">
+                <Avatar name={me.data.name} size="sm" />
                 <span>
                   <b>{me.data.name}</b> · {me.data.teams.map((t) => t.name).join(' + ') || 'no team'}
                 </span>

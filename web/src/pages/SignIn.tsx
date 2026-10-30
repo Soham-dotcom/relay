@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, auth, type DemoPerson } from '../api';
-import { ErrorBox, Loading } from '../ui';
+import { Avatar, ErrorBox, Loading } from '../ui';
 
 /** Demo sign-in: pick a person. The server still issues a signed token and enforces access on every request. */
 export default function SignIn() {
@@ -41,11 +41,14 @@ export default function SignIn() {
                   key={p.id}
                   onClick={() => login.mutate(p.id)}
                   disabled={login.isPending}
-                  className="rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-teal-500 hover:shadow-sm disabled:opacity-50"
+                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-teal-500 hover:shadow-md disabled:opacity-50"
                 >
-                  <span className="block font-medium text-slate-900">{p.name}</span>
-                  <span className="block text-xs text-slate-500">
-                    {p.role} · {p.teams.map((t) => t.name).join(' + ')}
+                  <Avatar name={p.name} size="lg" />
+                  <span>
+                    <span className="block font-medium text-slate-900">{p.name}</span>
+                    <span className="block text-xs text-slate-500">
+                      {p.role} · {p.teams.map((t) => t.name).join(' + ')}
+                    </span>
                   </span>
                 </button>
               ))}

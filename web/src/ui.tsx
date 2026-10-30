@@ -101,6 +101,46 @@ export function VisibilityPicker({ value, onChange, privateHint }: { value: Visi
   );
 }
 
+const avatarTones = ['bg-teal-600', 'bg-sky-600', 'bg-violet-600', 'bg-amber-600', 'bg-rose-600', 'bg-emerald-600', 'bg-indigo-600'];
+
+/** Coloured initials. The colour comes from the name, so a person keeps the same colour everywhere. */
+export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
+  const initials = name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const dims = { sm: 'h-6 w-6 text-[10px]', md: 'h-8 w-8 text-xs', lg: 'h-10 w-10 text-sm' }[size];
+  return (
+    <span aria-hidden className={`inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white ring-2 ring-white ${dims} ${avatarTones[h % avatarTones.length]}`}>
+      {initials}
+    </span>
+  );
+}
+
+export function AvatarStack({ names, max = 5 }: { names: string[]; max?: number }) {
+  return (
+    <span className="flex items-center -space-x-1.5" title={names.join(', ')}>
+      {names.slice(0, max).map((n) => (
+        <Avatar key={n} name={n} size="sm" />
+      ))}
+      {names.length > max && <span className="pl-3 text-xs text-slate-500">+{names.length - max}</span>}
+    </span>
+  );
+}
+
+export function Stat({ label, value, tone = 'text-slate-900', hint }: { label: string; value: number | string; tone?: string; hint?: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3" title={hint}>
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+    </div>
+  );
+}
+
 export const StatusBadge =({ status }: { status: ItemStatus | SessionStatus }) => <Badge tone={statusStyle[status]}>{status.replace('_', ' ').toLowerCase()}</Badge>;
 
 export function ErrorBox({ error }: { error: unknown }) {

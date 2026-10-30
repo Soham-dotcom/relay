@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Attendance, type Brief, type Person, type RecapDraft, type SessionDetail, type SessionStatus, type SessionSummary } from '../api';
-import { Badge, Button, Card, Empty, ErrorBox, fmtDate, inputCls, Loading, StatusBadge, VisibilityBadge } from '../ui';
+import { Avatar, Badge, Button, Card, Empty, ErrorBox, fmtDate, inputCls, Loading, StatusBadge, VisibilityBadge } from '../ui';
 import { ItemRow, NewItemForm } from '../components/ItemRow';
 
 export default function SessionPage() {
@@ -283,10 +283,10 @@ function ParticipantsCard({ s }: { s: SessionDetail }) {
       <ul className="space-y-2">
         {s.participants.map((p) => (
           <li key={p.personId} className="flex items-center justify-between gap-2 text-sm">
-            <span>
+            <span className="flex items-center gap-2"><Avatar name={p.person.name} size="sm" /><span>
               {p.person.name}
               <span className="block text-xs text-slate-500">{p.person.role}</span>
-            </span>
+            </span></span>
             <select aria-label={`${p.person.name} attendance`} className={`${inputCls} !w-28 ${p.attendance === 'MISSED' ? 'text-red-700' : ''}`} value={p.attendance} onChange={(e) => set.mutate({ personId: p.personId, attendance: e.target.value as Attendance })}>
               <option value="INVITED">Invited</option>
               <option value="ATTENDED">Attended</option>
