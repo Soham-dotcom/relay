@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SessionKind {
+  MEETING
+  TRANSFER
+}
+
+enum SessionStatus {
+  PLANNED
+  HELD
+  CLOSED
+}
+
+enum Attendance {
+  INVITED
+  ATTENDED
+  MISSED
+}
+
+enum ItemStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  DROPPED
+}
+
+enum ItemEventType {
+  CREATED
+  STATUS_CHANGED
+  REASSIGNED
+  DUE_CHANGED
+  CARRIED_FORWARD
+  OUTCOME_RECORDED
+}
+
+enum DocSource {
+  DOCUMENT
+  MEETING
+}
+
+enum ConflictStatus {
+  OPEN
+  DISMISSED
+  RESOLVED
+}
+
+model Person {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  role         String?
+  createdAt    DateTime      @default(now())
+  participants Participant[]
+  ownedItems   ActionItem[]  @relation("ItemOwner")
+}
+
+/// A meeting or a work transfer (hand-over). Both share the same lifecycle.
+model Session {
+  id            String        @id @default(cuid())
+  kind          SessionKind   @default(MEETING)
+  title         String
+  scheduledAt   DateTime
+  status        SessionStatus @default(PLANNED)
+  agenda        String        @default("")
+  notes         String        @default("")
+  summary       String?
+  /// Work transfer only: who is handing over and who takes over.
+  fromPersonId  String?
+  toPersonId    String?
+  /// The session this one follows on from (open items were carried from it).
+  previousId    String?
+  previous      Session?      @relation("SessionChain", fields: [previousId], references: [id])
+  next          Session[]     @relation("SessionChain")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  participants  Participant[]
+  decisions     Decision[]
+  items         ActionItem[]  @relation("CurrentSession")
+  originItems   ActionItem[]  @relation("OriginSession")
+  events        ItemEvent[]
+  doc           KnowledgeDoc?
+
+  @@index([scheduledAt])
+}
+
+model Participant {
+  sessionId  String
+  personId   String
+  attendance Attendance @default(INVITED)
+  session    Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  person     Person     @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, personId])
+}
+
+model Decision {
+  id         String             @id @default(cuid())
+  sessionId  String
+  text       String
+  createdAt  DateTime           @default(now())
+  session    Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  conflicts  DecisionConflict[] @relation("NewDecision")
+  conflictedBy DecisionConflict[] @relation("PastDecision")
+  links      KnowledgeLink[]
+}
+
+model ActionItem {
+  id               String          @id @default(cuid())
+  title            String
+  ownerId          String?
+  dueDate          DateTime?
+  status           ItemStatus      @default(OPEN)
+  outcome          String?
+  originSessionId  String
+  sessionId        String
+  closedAt         DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  owner            Person?         @relation("ItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  originSession    Session         @relation("OriginSession", fields: [originSessionId], references: [id], onDelete: Cascade)
+  session          Session         @relation("CurrentSession", fields: [sessionId], references: [id], onDelete: Cascade)
+  events           ItemEvent[]
+  links            KnowledgeLink[]
+
+  @@index([status])
+  @@index([ownerId])
+}
+
+/// Append-only history of an action item.
+model ItemEvent {
+  id        String        @id @default(cuid())
+  itemId    String
+  type      ItemEventType
+  fromValue String?
+  toValue   String?
+  note      String?
+  sessionId String?
+  at        DateTime      @default(now())
+  item      ActionItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  session   Session?      @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([itemId, at])
+}
+
+model KnowledgeDoc {
+  id        String          @id @default(cuid())
+  title     String
+  content   String
+  source    DocSource       @default(DOCUMENT)
+  sessionId String?         @unique
+  /// Embedding vector; empty when the embedding call failed (keyword fallback is used).
+  embedding Float[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  session   Session?        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  links     KnowledgeLink[]
+}
+
+/// AI-suggested link from an action item or decision to a knowledge doc, with the reason.
+model KnowledgeLink {
+  id         String       @id @default(cuid())
+  docId      String
+  itemId     String?
+  decisionId String?
+  reason     String
+  score      Float
+  createdAt  DateTime     @default(now())
+  doc        KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  item       ActionItem?  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  decision   Decision?    @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, itemId])
+  @@unique([docId, decisionId])
+}
+
+/// "Make it special": a new decision that contradicts an earlier one.
+model DecisionConflict {
+  id                String         @id @default(cuid())
+  decisionId        String
+  pastDecisionId    String
+  explanation       String
+  confidence        Float
+  status            ConflictStatus @default(OPEN)
+  resolution        String?
+  createdAt         DateTime       @default(now())
+  decision          Decision       @relation("NewDecision", fields: [decisionId], references: [id], onDelete: Cascade)
+  pastDecision      Decision       @relation("PastDecision", fields: [pastDecisionId], references: [id], onDelete: Cascade)
+
+  @@unique([decisionId, pastDecisionId])
+}

@@ -1,0 +1,11 @@
+{
+  "name": "relay",
+  "private": true,
+  "description": "AI-powered knowledge and task hand-over platform",
+  "scripts": {
+    "install:all": "npm ci --prefix server --include=dev && npm ci --prefix web --include=dev",
+    "build": "npm run build --prefix web && npm run build --prefix server",
+    "start": "npm start --prefix server",
+    "test": "npm test --prefix server"
+  }
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.log
+logs/
+server/.pgdata/
+.DS_Store
+.vscode/
+.claude/
+docs/PROGRESS.md
+docs/INTERVIEW_PREP.md
