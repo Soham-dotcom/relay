@@ -7,3 +7,23 @@
 body {
   @apply bg-slate-50 text-slate-800 antialiased;
 }
+
+/* Visible keyboard focus everywhere, invisible for mouse clicks. */
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-teal-600;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.animate-rise {
+  animation: rise 0.25s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise {
+    animation: none;
+  }
+}
