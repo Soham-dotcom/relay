@@ -38,22 +38,37 @@ function ConflictCard({ c }: { c: Conflict }) {
     mutationFn: (status: Conflict['status']) => api(`/conflicts/${c.id}`, { method: 'PATCH', body: { status, resolution: note || undefined } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conflicts'] }),
   });
-  const side = (label: string, d: Conflict['decision']) => (
-    <div className="rounded-md border border-slate-200 p-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-sm text-slate-900">{d.text}</p>
+  const pct = Math.round(c.confidence * 100);
+  const side = (label: string, d: Conflict['decision'], older: boolean) => (
+    <div className={`rounded-md border p-3 ${older ? 'border-slate-200 bg-slate-50' : 'border-orange-300 bg-orange-50/50'}`}>
+      <p className={`text-xs font-semibold uppercase tracking-wide ${older ? 'text-slate-500' : 'text-orange-700'}`}>{label}</p>
+      <p className={`mt-1 text-sm ${older ? 'text-slate-500 line-through decoration-slate-300' : 'font-medium text-slate-900'}`}>{d.text}</p>
       <Link to={`/sessions/${d.session.id}`} className="mt-1 inline-block text-xs text-teal-700 hover:underline">
         {d.session.title} · {fmtDate(d.session.scheduledAt)}
       </Link>
     </div>
   );
   return (
-    <Card title={<span className="flex items-center gap-2">⚠ Conflicting decisions <Badge>{Math.round(c.confidence * 100)}% confident</Badge></span>}>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {side('Earlier decision', c.pastDecision)}
-        {side('Newer decision', c.decision)}
+    <Card
+      className="animate-rise border-l-4 border-l-orange-500"
+      title={<span className="flex items-center gap-2">⚠ Conflicting decisions</span>}
+      actions={
+        <span className="flex items-center gap-2 text-xs text-slate-600" title="How sure the AI is that these really contradict">
+          <span className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
+            <span className="block h-full rounded-full bg-orange-500" style={{ width: `${pct}%` }} />
+          </span>
+          <Badge>{pct}% confident</Badge>
+        </span>
+      }
+    >
+      <div className="grid items-center gap-2 sm:grid-cols-[1fr_auto_1fr]">
+        {side('Earlier decision', c.pastDecision, true)}
+        <span aria-hidden className="text-center text-xl text-orange-500 sm:rotate-0">→</span>
+        {side('Newer decision', c.decision, false)}
       </div>
-      <p className="mt-3 text-sm text-slate-700"><b>Why AI flagged it:</b> {c.explanation}</p>
+      <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
+        <b>✦ Why AI flagged it:</b> {c.explanation}
+      </p>
       {c.status === 'OPEN' ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <input aria-label="Resolution note" className={`${inputCls} min-w-[220px] flex-1`} placeholder="Resolution, e.g. 'Newer decision stands; sprint plan updated'" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />

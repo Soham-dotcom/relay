@@ -43,8 +43,15 @@ export default function KnowledgePage() {
           <ErrorBox error={docs.error ?? del.error} />
           {docs.data?.length === 0 && <Empty>No documents found.</Empty>}
           {docs.data?.map((d) => (
-            <article key={d.id} id={d.id} className={`rounded-lg border bg-white p-4 ${hash === `#${d.id}` ? 'border-teal-500 ring-2 ring-teal-500/20' : 'border-slate-200'}`}>
+            <article
+              key={d.id}
+              id={d.id}
+              className={`animate-rise rounded-lg border border-l-4 bg-white p-4 transition hover:shadow-md ${
+                { PRIVATE: 'border-l-rose-400', TEAM: 'border-l-slate-400', ORG: 'border-l-emerald-500' }[d.visibility]
+              } ${hash === `#${d.id}` ? 'border-teal-500 ring-2 ring-teal-500/20' : 'border-slate-200'}`}
+            >
               <div className="flex flex-wrap items-center gap-2">
+                <span aria-hidden className="text-lg">{d.source === 'MEETING' ? '🗓️' : '📄'}</span>
                 <Badge tone={d.source === 'MEETING' ? 'bg-sky-50 text-sky-700 ring-sky-200' : undefined}>{d.source === 'MEETING' ? 'Past meeting' : 'Document'}</Badge>
                 <VisibilityBadge visibility={d.visibility} team={d.team} />
                 <h2 className="font-medium text-slate-900">{d.title}</h2>

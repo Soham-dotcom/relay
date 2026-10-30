@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type ActionItem, type ItemStatus, type Person } from '../api';
-import { Badge, Button, ErrorBox, fmtDate, inputCls, isOverdue, StatusBadge } from '../ui';
+import { Avatar, Badge, Button, ErrorBox, fmtDate, inputCls, isOverdue, StatusBadge } from '../ui';
 
 const STATUSES: ItemStatus[] = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'DROPPED'];
 const CLOSED = ['DONE', 'DROPPED'];
@@ -42,7 +42,15 @@ export function ItemRow({ item, people, showSession }: { item: ActionItem; peopl
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-        <div className="min-w-[220px] flex-1">
+        <div className="flex min-w-[220px] flex-1 gap-2.5">
+          {item.owner ? (
+            <Avatar name={item.owner.name} />
+          ) : (
+            <span title="No owner" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-amber-400 text-xs font-semibold text-amber-600">
+              ?
+            </span>
+          )}
+          <div className="min-w-0">
           <p className={`text-sm font-medium ${CLOSED.includes(item.status) ? 'text-slate-500 line-through decoration-slate-300' : 'text-slate-900'}`}>{item.title}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <StatusBadge status={item.status} />
@@ -57,6 +65,7 @@ export function ItemRow({ item, people, showSession }: { item: ActionItem; peopl
             {item.links.length > 0 && <span>· {item.links.length} linked doc{item.links.length > 1 ? 's' : ''}</span>}
           </div>
           {item.outcome && <p className="mt-1 text-xs text-slate-600"><b>Outcome:</b> {item.outcome}</p>}
+          </div>
         </div>
         <select aria-label="Owner" className={`${inputCls} !w-36`} value={item.ownerId ?? ''} onChange={(e) => patch.mutate({ ownerId: e.target.value || null })}>
           <option value="">Unassigned</option>
