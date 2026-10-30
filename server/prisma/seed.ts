@@ -97,6 +97,24 @@ async function main() {
       content:
         'Personal notes before leave. The new webhook secret is in the vault under payments/razorpay/webhook-v2; the old one must stay active until Razorpay confirms the switch. The replay script needs STAGING_DB_URL set. Ask Vikram for the k6 staging token.',
     },
+    {
+      key: 'postmortem',
+      title: 'Postmortem: webhook outage on 2 October',
+      content:
+        'For 47 minutes on 2 Oct, payment.captured webhooks failed with 500s because a deploy rotated RAZORPAY_WEBHOOK_SECRET without updating the dashboard. 312 orders stayed "pending". Root cause: secret rotation was a manual two-step change with no check. Fixes: store every webhook before processing (done), a replay script for failed events, alert when the webhook failure rate passes 2% over 15 minutes, and a rotation runbook that keeps the old secret active until the new one is confirmed.',
+    },
+    {
+      key: 'onboarding',
+      title: 'Engineering onboarding guide',
+      content:
+        'Week 1: get access to GitHub, the staging environment and the on-call rota; read the payments architecture and the release process. Week 2: ship one small fix with a buddy. Every engineer joins on-call after 6 weeks. Hand-overs before leave must list open items, credentials in the vault (never in notes) and who to ask.',
+    },
+    {
+      key: 'refundPolicy',
+      title: 'Refund policy and SLAs',
+      content:
+        'Failed autopay debits: refund within 3 working days, automatically. Duplicate charges: refund within 24 hours after confirmation. Refunds above 10,000 rupees need a payments lead approval. Every refund promise made to a customer must match this policy.',
+    },
   ];
   // Who can see each document: most are team docs, two are company-wide, one is Rahul's private draft.
   const docScope: Record<string, { visibility: 'PRIVATE' | 'TEAM' | 'ORG'; teamId: string | null; createdById: string }> = {
@@ -108,6 +126,9 @@ async function main() {
     macro: { visibility: 'TEAM', teamId: support, createdById: P('kavya') },
     escalation: { visibility: 'ORG', teamId: null, createdById: P('kavya') },
     rahulNotes: { visibility: 'PRIVATE', teamId: null, createdById: P('rahul') },
+    postmortem: { ...paymentsTeam, createdById: P('rahul') },
+    onboarding: { visibility: 'ORG', teamId: null, createdById: P('priya') },
+    refundPolicy: { visibility: 'ORG', teamId: null, createdById: P('neha') },
   };
   const vectors = await embedTexts('seed.embed_docs', docSpecs.map((s) => `${s.title}\n${s.content}`));
   const docs: Record<string, string> = {};
@@ -366,21 +387,131 @@ async function main() {
     },
   });
   await dec(triage.id, 'Promise customers a refund within 3 working days for any failed autopay debit.', '2026-10-27');
+  // Support's next triage: open items from 27 Oct were carried into it.
+  const triage2 = await prisma.session.create({
+    data: {
+      title: 'Support weekly triage',
+      scheduledAt: d('2026-11-03'),
+      status: 'PLANNED',
+      visibility: 'TEAM',
+      teamId: support,
+      createdById: P('kavya'),
+      previousId: triage.id,
+      agenda: '1. Open items from 27 Oct\n2. Launch-day staffing for 15 Nov',
+      participants: { create: ['kavya', 'arjun', 'neha'].map((k) => ({ personId: P(k) })) },
+    },
+  });
+  const triageTitle = 'Support weekly triage (27 Oct)';
+  const triage2Title = 'Support weekly triage (3 Nov)';
   const iMacro = await item({
     title: 'Publish the failed-debit support macro',
     owner: 'arjun', due: '2026-10-31',
-    origin: triage.id, current: triage.id, createdAt: '2026-10-27',
+    origin: triage.id, current: triage2.id, createdAt: '2026-10-27',
+    events: [{ type: 'CARRIED_FORWARD', from: triageTitle, to: triage2Title, at: '2026-10-29', sessionId: triage2.id }],
   });
   await item({
     title: 'Brief the support team on the 15 Nov launch date',
     owner: 'kavya', due: '2026-11-07',
-    origin: triage.id, current: triage.id, createdAt: '2026-10-28',
+    origin: triage.id, current: triage2.id, createdAt: '2026-10-28',
+    events: [{ type: 'CARRIED_FORWARD', from: triageTitle, to: triage2Title, at: '2026-10-29', sessionId: triage2.id }],
+  });
+  await item({
+    title: 'Tag all failed-debit tickets with "autopay-failed"',
+    owner: 'arjun', due: '2026-10-28', status: 'DONE', outcome: 'Done: 14 tickets tagged; the tag now feeds the weekly report.',
+    origin: triage.id, current: triage.id, createdAt: '2026-10-27',
+    events: [{ type: 'STATUS_CHANGED', from: 'OPEN', to: 'DONE', at: '2026-10-28', sessionId: triage.id }],
   });
   await link(docs.macro, 'This is the macro the item publishes: wording, refund promise and when to escalate.', 0.95, { itemId: iMacro.id });
   await link(docs.escalation, 'Defines when a failed debit must be escalated to Payments on-call.', 0.7, { itemId: iMacro.id });
+  await link(docs.refundPolicy, 'The macro must promise exactly the refund times in the policy (3 working days for failed debits).', 0.9, { itemId: iMacro.id });
+
+  // Private 1-on-1 inside Support: only Kavya and Arjun see it.
+  const oneOnOne = await prisma.session.create({
+    data: {
+      title: 'Kavya / Arjun 1-on-1',
+      scheduledAt: d('2026-10-29'),
+      status: 'HELD',
+      visibility: 'PRIVATE',
+      teamId: support,
+      createdById: P('kavya'),
+      notes: 'Arjun wants to move towards payments escalations. Agreed he shadows on-call.',
+      summary: 'Arjun wants more payments exposure; he will shadow three escalations with Payments on-call before taking any alone.',
+      participants: { create: [{ personId: P('kavya'), attendance: 'ATTENDED' }, { personId: P('arjun'), attendance: 'ATTENDED' }] },
+    },
+  });
+  await item({ title: 'Shadow three escalations with Payments on-call', owner: 'arjun', due: '2026-11-20', origin: oneOnOne.id, current: oneOnOne.id, createdAt: '2026-10-29' });
+
+  // Company all-hands: everyone sees it. Its launch date is later contradicted by Payments.
+  const allHands = await prisma.session.create({
+    data: {
+      title: 'Company all-hands: Q4 priorities',
+      scheduledAt: d('2026-10-16'),
+      status: 'HELD',
+      visibility: 'ORG',
+      teamId: null,
+      createdById: P('neha'),
+      agenda: '1. Q4 goals\n2. UPI autopay launch\n3. Support readiness',
+      notes: 'Neha presented Q4 goals. UPI autopay launch announced for 1 November. Support asked for earlier notice on launches.',
+      summary: 'Q4 focus is UPI autopay. The launch was announced to the whole company for 1 November, and every customer-facing launch now needs a support briefing a week before.',
+      participants: { create: ['neha', 'priya', 'kavya'].map((k) => ({ personId: P(k), attendance: 'ATTENDED' as const })) },
+    },
+  });
+  const dAllHands = await dec(allHands.id, 'UPI autopay goes live for all customers on 1 November (company announcement).', '2026-10-16');
+  const dBriefing = await dec(allHands.id, 'Every customer-facing launch needs a support briefing one week before go-live.', '2026-10-16');
+  await item({
+    title: 'Publish the customer FAQ for UPI autopay',
+    owner: 'neha', due: '2026-10-30', status: 'IN_PROGRESS',
+    origin: allHands.id, current: allHands.id, createdAt: '2026-10-16',
+    events: [{ type: 'STATUS_CHANGED', from: 'OPEN', to: 'IN_PROGRESS', at: '2026-10-22', sessionId: allHands.id }],
+  });
+  await link(docs.release, 'Launch announcements follow the release process and its gradual feature-flag rollout.', 0.65, { decisionId: dAllHands.id });
+  await link(docs.escalation, 'Support briefings should cover the escalation path for the new feature.', 0.6, { decisionId: dBriefing.id });
+  // The org-wide announcement is visible to everyone who sees the Payments sync, so this pair may be compared.
+  await prisma.decisionConflict.create({
+    data: {
+      decisionId: d5.id,
+      pastDecisionId: dAllHands.id,
+      explanation:
+        'The whole company was told on 16 Oct that UPI autopay goes live on 1 November; Payments moved it to 15 November on 28 Oct. Support and anyone outside Payments still expects 1 November.',
+      confidence: 0.92,
+    },
+  });
+
+  // Older Payments retro: closed items with outcomes, so history goes back further.
+  const retro = await prisma.session.create({
+    data: {
+      title: 'Sprint 13 retro',
+      scheduledAt: d('2026-10-07'),
+      status: 'CLOSED',
+      ...paymentsTeam,
+      createdById: P('priya'),
+      notes: 'Webhook outage on 2 Oct dominated. Agreed fixes from the postmortem.',
+      summary: 'The retro focused on the 2 Oct webhook outage. The team agreed to store webhooks before processing and to add an alert on webhook failures.',
+      participants: { create: ['priya', 'rahul', 'aisha', 'vikram', 'neha'].map((k) => ({ personId: P(k), attendance: 'ATTENDED' as const })) },
+    },
+  });
+  await prisma.session.update({ where: { id: s1.id }, data: { previousId: retro.id } });
+  await dec(retro.id, 'Alert when the webhook failure rate passes 2% over 15 minutes.', '2026-10-07');
+  const iAlert = await item({
+    title: 'Add webhook failure-rate alert',
+    owner: 'vikram', due: '2026-10-10', status: 'DONE', outcome: 'Alert live in Grafana; tested by forcing failures on staging.',
+    origin: retro.id, current: retro.id, createdAt: '2026-10-07',
+    events: [
+      { type: 'STATUS_CHANGED', from: 'OPEN', to: 'DONE', at: '2026-10-10', sessionId: retro.id },
+      { type: 'OUTCOME_RECORDED', to: 'Alert live in Grafana; tested by forcing failures on staging.', at: '2026-10-10', sessionId: retro.id },
+    ],
+  });
+  await item({
+    title: 'Write the secret-rotation runbook',
+    owner: 'rahul', due: '2026-10-11', status: 'DROPPED', outcome: 'Dropped: folded into the webhook runbook (step 1) instead of a separate document.',
+    origin: retro.id, current: retro.id, createdAt: '2026-10-07',
+    events: [{ type: 'STATUS_CHANGED', from: 'OPEN', to: 'DROPPED', at: '2026-10-12', sessionId: retro.id }],
+  });
+  await link(docs.postmortem, 'The postmortem sets the 2%/15-minute alert threshold this item implements.', 0.93, { itemId: iAlert.id });
+  await link(docs.postmortem, 'Background: the 2 Oct outage was caused by a secret rotation, which is what this work finishes.', 0.85, { itemId: iSecret.id });
 
   // Past held sessions become knowledge docs too; access follows the session.
-  for (const s of [s1, s2, s3, triage]) {
+  for (const s of [retro, allHands, s1, s2, s3, triage, oneOnOne]) {
     const full = await prisma.session.findUniqueOrThrow({ where: { id: s.id }, include: { decisions: true } });
     await prisma.knowledgeDoc.create({
       data: {
@@ -396,7 +527,7 @@ async function main() {
     });
   }
 
-  console.log(`Seeded: ${Object.keys(people).length} people, 2 teams, 6 sessions, ${docSpecs.length + 4} docs, 1 conflict.`);
+  console.log(`Seeded: ${Object.keys(people).length} people, 2 teams, 10 sessions, ${docSpecs.length + 7} docs, 2 conflicts.`);
 }
 
 main()

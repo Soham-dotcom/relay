@@ -39,7 +39,7 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 6. **Action items** shows every item you can see, with counters (open, overdue, carried 2+ times, no owner). Change owner, due date or status inline. Closing asks for the **outcome**; **History** shows the full timeline.
 7. **Rahul on leave: webhook work to Priya** is a 🔒 private work transfer. **Reassign all of Rahul's open items to Priya** hands everything over in one click, recorded in each item's history.
 8. **Conflicts** lists open conflicts side by side with the AI's reason. **Mark resolved** (with a note) or **Not a conflict**.
-9. **Switch user** (top right) → **Kavya Nair** (Support). She sees only the Support triage and the two org-wide documents. Payments meetings, Rahul's private notes and the private hand-over are invisible. Opening their URLs returns "not found".
+9. **Switch user** (top right) → **Kavya Nair** (Support). She sees the two Support triages, her private 1-on-1 with Arjun, the company all-hands and the org-wide documents. Payments meetings, Rahul's private notes and the private hand-over are invisible. Opening their URLs returns "not found".
 
 ## ★ Special feature: decision conflict check
 
@@ -54,7 +54,7 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 
 **How it stays reliable.** Two stages: cheap retrieval (embeddings, or keyword overlap if embeddings fail) picks the 5 most related earlier decisions, and only those pairs go to the model. The model can only answer about ids it was sent (any other id is dropped), and only conflicts with confidence ≥ 0.6 are stored. With no AI available, Relay stores **no** conflicts rather than guessing with rules: a false alarm costs more trust than a missed one.
 
-The seeded demo already contains this conflict (Payments weekly sync, 28 Oct).
+The seeded demo already contains two conflicts on the 28 Oct Payments sync: against the team's own 14 Oct plan, and against the 16 Oct company all-hands announcement of 1 November (which the whole company saw).
 
 ## Access control: the right context for the right people
 
@@ -80,7 +80,7 @@ Action items follow their session, and **people always see their own items**, ev
 - **Conflict check:** a new decision is only compared with earlier decisions its whole audience can see. Otherwise the explanation would quote a private decision to the team.
 - Because links and conflicts are created audience-safe and visibility can't change afterwards, showing them later needs no extra checks. Org-wide documents still filter their "linked to" list per viewer, since an org doc can be linked to a team decision.
 
-Try it: sign in as **Aisha** (Payments: 4 sessions), **Kavya** (Support: only the support triage plus the 2 org documents), **Neha** (in both teams: sees both), or **Rahul** / **Priya** (the only ones who see the private hand-over).
+Try it: sign in as **Aisha** (Payments: 6 sessions, 14 docs), **Kavya** (Support: 4 sessions incl. her private 1-on-1, 8 docs, 0 conflicts because both conflicts involve a Payments-only decision), **Neha** (in both teams: 8 sessions), or **Rahul** / **Priya** (the only ones who see the private hand-over; only Rahul sees his private notes).
 
 ## Tech stack
 
@@ -165,7 +165,7 @@ Nine access-control tests check: no token → 401; a private session is a 404 fo
 - **Schema** (`server/prisma/schema.prisma`): `Person`, `Team` + `TeamMember`, `Session` (meeting or transfer, with `visibility` + owning `teamId`, and `previousId` forming a chain), `Participant` (attendance), `Decision`, `ActionItem` (owner, due date, status, outcome, origin session and current session), `ItemEvent` (append-only history), `KnowledgeDoc` (with embedding, `visibility`, `teamId`, author), `KnowledgeLink` (with AI reason), `DecisionConflict`.
 - **History is append-only.** Every create, status change, reassignment, due-date change, carry-forward and outcome writes an `ItemEvent`, so an item's whole life can be replayed.
 - **Integrity rules in the service layer:** an item can't close without an outcome (422); a session can't close with open items (409); a transfer needs two different people; people and sessions must exist (400/404). Multi-row changes run in transactions.
-- **Demo data** (`npm run db:seed`): two teams. **Payments squad** (5 people): three weekly syncs, a planned next sync, and a **private** work transfer (Rahul going on leave, visible only to Rahul and Priya). **Customer support** (Kavya, Arjun): a weekly triage only they can see. Neha (product) is in both teams. It includes items carried forward three times, an overdue blocked item, closed items with outcomes, a dropped item with its reason, an unassigned item, 8 documents (team, org-wide and one private draft) with links, and the launch-date conflict.
+- **Demo data** (`npm run db:seed`): 7 people in two teams, 10 sessions, 11 documents (+7 past-meeting docs), 2 conflicts. **Payments squad** (5 people): a Sprint 13 retro, Sprint 14 planning, three weekly syncs (one planned) and a **private** work transfer (Rahul going on leave, visible only to Rahul and Priya). **Customer support** (Kavya, Arjun): two weekly triages and a **private** 1-on-1. A 🌐 **company all-hands** everyone sees. Neha (product) is in both teams. It includes items carried forward up to three times, overdue and blocked items, closed items with outcomes, dropped items with reasons, an unassigned item, team / org-wide / private documents (incl. an incident postmortem and the refund policy) with AI-style links, and the launch-date conflicts.
 
 ## Logging
 
@@ -215,7 +215,7 @@ relay/
 │   ├── prisma/
 │   │   ├── schema.prisma       Data model (sessions, items, history, teams, visibility, knowledge, conflicts)
 │   │   ├── migrations/         SQL migrations, applied on start with `prisma migrate deploy`
-│   │   └── seed.ts             Demo data: two teams, 6 sessions, 8 documents, 1 conflict
+│   │   └── seed.ts             Demo data: two teams, 10 sessions, 11 documents, 2 conflicts
 │   ├── src/
 │   │   ├── index.ts            Starts the server, graceful shutdown
 │   │   ├── app.ts              Express app: request ID, access log, routes, serves the built UI
