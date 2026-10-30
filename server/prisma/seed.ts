@@ -20,6 +20,8 @@ async function main() {
     prisma.knowledgeDoc.deleteMany(),
     prisma.participant.deleteMany(),
     prisma.session.deleteMany(),
+    prisma.teamMember.deleteMany(),
+    prisma.team.deleteMany(),
     prisma.person.deleteMany(),
   ]);
 
@@ -31,10 +33,19 @@ async function main() {
         ['aisha', 'Aisha Khan', 'Frontend engineer'],
         ['vikram', 'Vikram Rao', 'QA engineer'],
         ['neha', 'Neha Iyer', 'Product manager'],
+        ['kavya', 'Kavya Nair', 'Support lead'],
+        ['arjun', 'Arjun Das', 'Support engineer'],
       ].map(async ([key, name, role]) => [key, await prisma.person.create({ data: { name, role, email: `${key}@payflow.dev` } })] as const),
     ),
   );
   const P = (k: keyof typeof people) => people[k].id;
+
+  // ---------- Teams: Neha (product) sits in both, everyone else in one ----------
+  const team = async (name: string, keys: (keyof typeof people)[]) =>
+    (await prisma.team.create({ data: { name, members: { create: keys.map((k) => ({ personId: P(k) })) } } })).id;
+  const payments = await team('Payments squad', ['priya', 'rahul', 'aisha', 'vikram', 'neha']);
+  const support = await team('Customer support', ['kavya', 'arjun', 'neha']);
+  const paymentsTeam = { visibility: 'TEAM' as const, teamId: payments };
 
   // ---------- Knowledge base documents ----------
   const docSpecs = [
@@ -68,11 +79,40 @@ async function main() {
       content:
         'We compared Razorpay, Cashfree and PayU. Razorpay chosen: best UPI autopay support, clear webhook docs, 2% fee. Cashfree was cheaper (1.9%) but its mandate API was in beta. Revisit if monthly volume passes 50 lakh transactions.',
     },
+    {
+      key: 'macro',
+      title: 'Support macro: failed autopay debit',
+      content:
+        'Use when a customer reports a failed UPI autopay debit. Apologise, confirm the mandate is still active, explain that the bank retries once after 24 hours, and that any amount debited without a successful payment is refunded within 3 working days. Escalate to Payments on-call if the same customer fails twice in a week.',
+    },
+    {
+      key: 'escalation',
+      title: 'Customer escalation policy',
+      content:
+        'Severity 1 (money taken, service not given): page Payments on-call within 15 minutes, update the customer every 2 hours. Severity 2 (feature broken, no money impact): ticket to the owning team, reply within 1 working day. All escalations are logged in the escalation tracker.',
+    },
+    {
+      key: 'rahulNotes',
+      title: "Rahul's hand-over notes (private draft)",
+      content:
+        'Personal notes before leave. The new webhook secret is in the vault under payments/razorpay/webhook-v2; the old one must stay active until Razorpay confirms the switch. The replay script needs STAGING_DB_URL set. Ask Vikram for the k6 staging token.',
+    },
   ];
+  // Who can see each document: most are team docs, two are company-wide, one is Rahul's private draft.
+  const docScope: Record<string, { visibility: 'PRIVATE' | 'TEAM' | 'ORG'; teamId: string | null; createdById: string }> = {
+    arch: { ...paymentsTeam, createdById: P('rahul') },
+    runbook: { ...paymentsTeam, createdById: P('rahul') },
+    checklist: { ...paymentsTeam, createdById: P('neha') },
+    release: { visibility: 'ORG', teamId: null, createdById: P('priya') },
+    gateway: { ...paymentsTeam, createdById: P('priya') },
+    macro: { visibility: 'TEAM', teamId: support, createdById: P('kavya') },
+    escalation: { visibility: 'ORG', teamId: null, createdById: P('kavya') },
+    rahulNotes: { visibility: 'PRIVATE', teamId: null, createdById: P('rahul') },
+  };
   const vectors = await embedTexts('seed.embed_docs', docSpecs.map((s) => `${s.title}\n${s.content}`));
   const docs: Record<string, string> = {};
   for (const [i, s] of docSpecs.entries()) {
-    const doc = await prisma.knowledgeDoc.create({ data: { title: s.title, content: s.content, embedding: vectors?.[i] ?? [] } });
+    const doc = await prisma.knowledgeDoc.create({ data: { title: s.title, content: s.content, embedding: vectors?.[i] ?? [], ...docScope[s.key] } });
     docs[s.key] = doc.id;
   }
 
@@ -82,6 +122,8 @@ async function main() {
       title: 'Sprint 14 planning',
       scheduledAt: d('2026-10-14'),
       status: 'CLOSED',
+      ...paymentsTeam,
+      createdById: P('priya'),
       agenda: '1. UPI autopay scope\n2. Gateway choice\n3. Webhook reliability',
       notes: 'Agreed scope for UPI autopay. Razorpay confirmed. Webhooks keep failing silently on retries; need storage + replay.',
       summary: 'The team fixed the scope of UPI autopay, confirmed Razorpay as the gateway and agreed to store every webhook before processing so failures can be replayed.',
@@ -93,6 +135,8 @@ async function main() {
       title: 'Payments weekly sync',
       scheduledAt: d('2026-10-21'),
       status: 'HELD',
+      ...paymentsTeam,
+      createdById: P('priya'),
       previousId: s1.id,
       agenda: '1. Carry-over items\n2. Mandate flow demo\n3. Load test plan',
       notes: 'Mandate creation demo worked in sandbox. Cancellation flow not started. Load test tooling picked: k6.',
@@ -113,6 +157,8 @@ async function main() {
       title: 'Payments weekly sync',
       scheduledAt: d('2026-10-28'),
       status: 'HELD',
+      ...paymentsTeam,
+      createdById: P('priya'),
       previousId: s2.id,
       agenda: '1. Launch date\n2. Bank certification status\n3. Rahul leave handover',
       notes:
@@ -136,6 +182,10 @@ async function main() {
       title: 'Rahul on leave: webhook work to Priya',
       scheduledAt: d('2026-11-02'),
       status: 'PLANNED',
+      // Private: a leave hand-over is between the two people involved.
+      visibility: 'PRIVATE',
+      teamId: payments,
+      createdById: P('rahul'),
       fromPersonId: P('rahul'),
       toPersonId: P('priya'),
       agenda: 'Walk through open webhook items, replay script, and the signature secret rotation.',
@@ -148,6 +198,8 @@ async function main() {
       title: 'Payments weekly sync',
       scheduledAt: d('2026-11-04'),
       status: 'PLANNED',
+      ...paymentsTeam,
+      createdById: P('priya'),
       previousId: s3.id,
       agenda: '1. Open items from 28 Oct\n2. Launch readiness for 15 Nov',
       participants: { create: ['priya', 'aisha', 'vikram', 'neha'].map((k) => ({ personId: P(k) })) },
@@ -292,8 +344,43 @@ async function main() {
   await link(docs.release, 'Launch dates follow the gradual feature-flag rollout in the release process.', 0.6, { decisionId: d5.id });
   void iWebhookTable;
 
-  // Past held sessions become knowledge docs too.
-  for (const s of [s1, s2, s3]) {
+  // ---------- Customer support team: invisible to people only in Payments ----------
+  const triage = await prisma.session.create({
+    data: {
+      title: 'Support weekly triage',
+      scheduledAt: d('2026-10-27'),
+      status: 'HELD',
+      visibility: 'TEAM',
+      teamId: support,
+      createdById: P('kavya'),
+      agenda: '1. Failed autopay debit tickets\n2. Launch communication',
+      notes: '14 tickets about failed autopay debits this week. Agreed a standard refund promise. Arjun drafts the macro.',
+      summary: 'Support saw 14 failed autopay debit tickets this week and agreed to promise customers a refund within 3 working days. Arjun will publish a support macro.',
+      participants: {
+        create: [
+          { personId: P('kavya'), attendance: 'ATTENDED' },
+          { personId: P('arjun'), attendance: 'ATTENDED' },
+          { personId: P('neha'), attendance: 'MISSED' },
+        ],
+      },
+    },
+  });
+  await dec(triage.id, 'Promise customers a refund within 3 working days for any failed autopay debit.', '2026-10-27');
+  const iMacro = await item({
+    title: 'Publish the failed-debit support macro',
+    owner: 'arjun', due: '2026-10-31',
+    origin: triage.id, current: triage.id, createdAt: '2026-10-27',
+  });
+  await item({
+    title: 'Brief the support team on the 15 Nov launch date',
+    owner: 'kavya', due: '2026-11-07',
+    origin: triage.id, current: triage.id, createdAt: '2026-10-28',
+  });
+  await link(docs.macro, 'This is the macro the item publishes: wording, refund promise and when to escalate.', 0.95, { itemId: iMacro.id });
+  await link(docs.escalation, 'Defines when a failed debit must be escalated to Payments on-call.', 0.7, { itemId: iMacro.id });
+
+  // Past held sessions become knowledge docs too; access follows the session.
+  for (const s of [s1, s2, s3, triage]) {
     const full = await prisma.session.findUniqueOrThrow({ where: { id: s.id }, include: { decisions: true } });
     await prisma.knowledgeDoc.create({
       data: {
@@ -301,12 +388,15 @@ async function main() {
         content: `Summary: ${full.summary}\n\nDecisions:\n${full.decisions.map((x) => `- ${x.text}`).join('\n')}`,
         source: 'MEETING',
         sessionId: s.id,
+        visibility: full.visibility,
+        teamId: full.teamId,
+        createdById: full.createdById,
         embedding: [],
       },
     });
   }
 
-  console.log(`Seeded: ${Object.keys(people).length} people, 5 sessions, ${docSpecs.length + 3} docs, 1 conflict.`);
+  console.log(`Seeded: ${Object.keys(people).length} people, 2 teams, 6 sessions, ${docSpecs.length + 4} docs, 1 conflict.`);
 }
 
 main()

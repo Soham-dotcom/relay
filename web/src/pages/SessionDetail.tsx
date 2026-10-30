@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Attendance, type Brief, type Person, type RecapDraft, type SessionDetail, type SessionStatus, type SessionSummary } from '../api';
-import { Badge, Button, Card, Empty, ErrorBox, fmtDate, inputCls, Loading, StatusBadge } from '../ui';
+import { Badge, Button, Card, Empty, ErrorBox, fmtDate, inputCls, Loading, StatusBadge, VisibilityBadge } from '../ui';
 import { ItemRow, NewItemForm } from '../components/ItemRow';
 
 export default function SessionPage() {
@@ -64,6 +64,7 @@ function Header({ s }: { s: SessionDetail }) {
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={s.kind === 'TRANSFER' ? 'bg-violet-50 text-violet-700 ring-violet-200' : undefined}>{s.kind === 'TRANSFER' ? 'Work transfer' : 'Meeting'}</Badge>
             <StatusBadge status={s.status} />
+            <VisibilityBadge visibility={s.visibility} team={s.team} />
             <span className="text-sm text-slate-500">{fmtDate(s.scheduledAt)}</span>
           </div>
           <h1 className="mt-1 text-xl font-semibold text-slate-900">{s.title}</h1>

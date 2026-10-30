@@ -2,6 +2,7 @@ import { ItemStatus, Prisma, type ActionItem } from '@prisma/client';
 import { prisma } from '../db.js';
 import { AppError, notFound } from '../errors.js';
 import { logger } from '../logger.js';
+import { itemWhere, type Viewer } from '../access.js';
 
 export const OPEN_STATUSES: ItemStatus[] = ['OPEN', 'IN_PROGRESS', 'BLOCKED'];
 const CLOSED_STATUSES: ItemStatus[] = ['DONE', 'DROPPED'];
@@ -140,8 +141,8 @@ export interface ItemFilters {
   overdue?: boolean;
 }
 
-export function listItems(f: ItemFilters) {
-  const where: Prisma.ActionItemWhereInput = {};
+export function listItems(f: ItemFilters, viewer: Viewer) {
+  const where: Prisma.ActionItemWhereInput = { AND: [itemWhere(viewer)] };
   if (f.status) where.status = f.status;
   if (f.open) where.status = { in: OPEN_STATUSES };
   if (f.ownerId) where.ownerId = f.ownerId === 'none' ? null : f.ownerId;

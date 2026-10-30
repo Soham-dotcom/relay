@@ -52,6 +52,14 @@ enum ConflictStatus {
   RESOLVED
 }
 
+/// Who can see a session or document. Fixed at creation: changing it later would invalidate
+/// the AI links and conflicts that were computed for the original audience.
+enum Visibility {
+  PRIVATE /// only participants (session) or the author (document)
+  TEAM /// members of the owning team, plus participants
+  ORG /// everyone
+}
+
 model Person {
   id           String        @id @default(cuid())
   name         String
@@ -60,33 +68,55 @@ model Person {
   createdAt    DateTime      @default(now())
   participants Participant[]
   ownedItems   ActionItem[]  @relation("ItemOwner")
+  memberships  TeamMember[]
+}
+
+model Team {
+  id       String         @id @default(cuid())
+  name     String         @unique
+  members  TeamMember[]
+  sessions Session[]
+  docs     KnowledgeDoc[]
+}
+
+model TeamMember {
+  teamId   String
+  personId String
+  team     Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  person   Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, personId])
 }
 
 /// A meeting or a work transfer (hand-over). Both share the same lifecycle.
 model Session {
-  id            String        @id @default(cuid())
-  kind          SessionKind   @default(MEETING)
-  title         String
-  scheduledAt   DateTime
-  status        SessionStatus @default(PLANNED)
-  agenda        String        @default("")
-  notes         String        @default("")
-  summary       String?
+  id           String        @id @default(cuid())
+  kind         SessionKind   @default(MEETING)
+  title        String
+  scheduledAt  DateTime
+  status       SessionStatus @default(PLANNED)
+  visibility   Visibility    @default(TEAM)
+  teamId       String?
+  team         Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdById  String?
+  agenda       String        @default("")
+  notes        String        @default("")
+  summary      String?
   /// Work transfer only: who is handing over and who takes over.
-  fromPersonId  String?
-  toPersonId    String?
+  fromPersonId String?
+  toPersonId   String?
   /// The session this one follows on from (open items were carried from it).
-  previousId    String?
-  previous      Session?      @relation("SessionChain", fields: [previousId], references: [id])
-  next          Session[]     @relation("SessionChain")
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  participants  Participant[]
-  decisions     Decision[]
-  items         ActionItem[]  @relation("CurrentSession")
-  originItems   ActionItem[]  @relation("OriginSession")
-  events        ItemEvent[]
-  doc           KnowledgeDoc?
+  previousId   String?
+  previous     Session?      @relation("SessionChain", fields: [previousId], references: [id])
+  next         Session[]     @relation("SessionChain")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  participants Participant[]
+  decisions    Decision[]
+  items        ActionItem[]  @relation("CurrentSession")
+  originItems  ActionItem[]  @relation("OriginSession")
+  events       ItemEvent[]
+  doc          KnowledgeDoc?
 
   @@index([scheduledAt])
 }
@@ -102,33 +132,33 @@ model Participant {
 }
 
 model Decision {
-  id         String             @id @default(cuid())
-  sessionId  String
-  text       String
-  createdAt  DateTime           @default(now())
-  session    Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  conflicts  DecisionConflict[] @relation("NewDecision")
+  id           String             @id @default(cuid())
+  sessionId    String
+  text         String
+  createdAt    DateTime           @default(now())
+  session      Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  conflicts    DecisionConflict[] @relation("NewDecision")
   conflictedBy DecisionConflict[] @relation("PastDecision")
-  links      KnowledgeLink[]
+  links        KnowledgeLink[]
 }
 
 model ActionItem {
-  id               String          @id @default(cuid())
-  title            String
-  ownerId          String?
-  dueDate          DateTime?
-  status           ItemStatus      @default(OPEN)
-  outcome          String?
-  originSessionId  String
-  sessionId        String
-  closedAt         DateTime?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  owner            Person?         @relation("ItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  originSession    Session         @relation("OriginSession", fields: [originSessionId], references: [id], onDelete: Cascade)
-  session          Session         @relation("CurrentSession", fields: [sessionId], references: [id], onDelete: Cascade)
-  events           ItemEvent[]
-  links            KnowledgeLink[]
+  id              String          @id @default(cuid())
+  title           String
+  ownerId         String?
+  dueDate         DateTime?
+  status          ItemStatus      @default(OPEN)
+  outcome         String?
+  originSessionId String
+  sessionId       String
+  closedAt        DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  owner           Person?         @relation("ItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  originSession   Session         @relation("OriginSession", fields: [originSessionId], references: [id], onDelete: Cascade)
+  session         Session         @relation("CurrentSession", fields: [sessionId], references: [id], onDelete: Cascade)
+  events          ItemEvent[]
+  links           KnowledgeLink[]
 
   @@index([status])
   @@index([ownerId])
@@ -151,17 +181,22 @@ model ItemEvent {
 }
 
 model KnowledgeDoc {
-  id        String          @id @default(cuid())
-  title     String
-  content   String
-  source    DocSource       @default(DOCUMENT)
-  sessionId String?         @unique
+  id          String          @id @default(cuid())
+  title       String
+  content     String
+  source      DocSource       @default(DOCUMENT)
+  /// For a MEETING doc these are copied from its session; access follows the session itself.
+  visibility  Visibility      @default(TEAM)
+  teamId      String?
+  team        Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdById String?
+  sessionId   String?         @unique
   /// Embedding vector; empty when the embedding call failed (keyword fallback is used).
-  embedding Float[]
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  session   Session?        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  links     KnowledgeLink[]
+  embedding   Float[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  session     Session?        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  links       KnowledgeLink[]
 }
 
 /// AI-suggested link from an action item or decision to a knowledge doc, with the reason.
@@ -183,16 +218,16 @@ model KnowledgeLink {
 
 /// "Make it special": a new decision that contradicts an earlier one.
 model DecisionConflict {
-  id                String         @id @default(cuid())
-  decisionId        String
-  pastDecisionId    String
-  explanation       String
-  confidence        Float
-  status            ConflictStatus @default(OPEN)
-  resolution        String?
-  createdAt         DateTime       @default(now())
-  decision          Decision       @relation("NewDecision", fields: [decisionId], references: [id], onDelete: Cascade)
-  pastDecision      Decision       @relation("PastDecision", fields: [pastDecisionId], references: [id], onDelete: Cascade)
+  id             String         @id @default(cuid())
+  decisionId     String
+  pastDecisionId String
+  explanation    String
+  confidence     Float
+  status         ConflictStatus @default(OPEN)
+  resolution     String?
+  createdAt      DateTime       @default(now())
+  decision       Decision       @relation("NewDecision", fields: [decisionId], references: [id], onDelete: Cascade)
+  pastDecision   Decision       @relation("PastDecision", fields: [pastDecisionId], references: [id], onDelete: Cascade)
 
   @@unique([decisionId, pastDecisionId])
 }

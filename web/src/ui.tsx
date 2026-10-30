@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import { ApiError, type ItemStatus, type SessionStatus } from './api';
+import { ApiError, type ItemStatus, type SessionStatus, type Visibility } from './api';
 
 export const fmtDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
@@ -58,7 +58,50 @@ export function Badge({ children, tone }: { children: ReactNode; tone?: string }
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone ?? 'bg-slate-100 text-slate-700 ring-slate-200'}`}>{children}</span>;
 }
 
-export const StatusBadge = ({ status }: { status: ItemStatus | SessionStatus }) => <Badge tone={statusStyle[status]}>{status.replace('_', ' ').toLowerCase()}</Badge>;
+const visibilityInfo: Record<Visibility, { icon: string; label: string; tone: string; hint: string }> = {
+  PRIVATE: { icon: '🔒', label: 'Private', tone: 'bg-rose-50 text-rose-800 ring-rose-200', hint: 'Only the participants (or the author) can see this' },
+  TEAM: { icon: '👥', label: 'Team', tone: 'bg-slate-100 text-slate-700 ring-slate-200', hint: 'Members of the team can see this' },
+  ORG: { icon: '🌐', label: 'Organisation', tone: 'bg-emerald-50 text-emerald-800 ring-emerald-200', hint: 'Everyone in the company can see this' },
+};
+
+export function VisibilityBadge({ visibility, team }: { visibility: Visibility; team?: { name: string } | null }) {
+  const v = visibilityInfo[visibility];
+  return (
+    <span title={v.hint}>
+      <Badge tone={v.tone}>
+        {v.icon} {visibility === 'TEAM' && team ? team.name : v.label}
+      </Badge>
+    </span>
+  );
+}
+
+/** Radio group for choosing who can see a new session or document. */
+export function VisibilityPicker({ value, onChange, privateHint }: { value: Visibility; onChange: (v: Visibility) => void; privateHint: string }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Who can see this">
+      {(['PRIVATE', 'TEAM', 'ORG'] as const).map((k) => {
+        const v = visibilityInfo[k];
+        return (
+          <button
+            type="button"
+            key={k}
+            role="radio"
+            aria-checked={value === k}
+            onClick={() => onChange(k)}
+            className={`rounded-md border px-3 py-2 text-left text-sm ${value === k ? 'border-teal-600 bg-teal-50' : 'border-slate-200'}`}
+          >
+            <b>
+              {v.icon} {v.label}
+            </b>
+            <span className="block text-xs text-slate-600">{k === 'PRIVATE' ? privateHint : v.hint}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export const StatusBadge =({ status }: { status: ItemStatus | SessionStatus }) => <Badge tone={statusStyle[status]}>{status.replace('_', ' ').toLowerCase()}</Badge>;
 
 export function ErrorBox({ error }: { error: unknown }) {
   if (!error) return null;

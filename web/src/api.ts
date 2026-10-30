@@ -2,6 +2,26 @@ export type ItemStatus = 'OPEN' | 'IN_PROGRESS' | 'BLOCKED' | 'DONE' | 'DROPPED'
 export type SessionStatus = 'PLANNED' | 'HELD' | 'CLOSED';
 export type SessionKind = 'MEETING' | 'TRANSFER';
 export type Attendance = 'INVITED' | 'ATTENDED' | 'MISSED';
+export type Visibility = 'PRIVATE' | 'TEAM' | 'ORG';
+
+export interface TeamRef {
+  id: string;
+  name: string;
+}
+
+export interface Me {
+  id: string;
+  name: string;
+  role: string | null;
+  teams: TeamRef[];
+}
+
+export interface DemoPerson {
+  id: string;
+  name: string;
+  role: string | null;
+  teams: TeamRef[];
+}
 
 export interface Person {
   id: string;
@@ -71,6 +91,8 @@ export interface SessionSummary {
   title: string;
   scheduledAt: string;
   status: SessionStatus;
+  visibility: Visibility;
+  team: TeamRef | null;
   participants: { person: { id: string; name: string }; attendance: Attendance }[];
   _count: { decisions: number; items: number };
   openItems: number;
@@ -113,6 +135,8 @@ export interface KnowledgeDoc {
   title: string;
   content: string;
   source: 'DOCUMENT' | 'MEETING';
+  visibility: Visibility;
+  team: TeamRef | null;
   sessionId: string | null;
   createdAt: string;
   links: { id: string; reason: string; item: { id: string; title: string; status: ItemStatus } | null; decision: { id: string; text: string; sessionId: string } | null }[];
@@ -133,12 +157,38 @@ export class ApiError extends Error {
   }
 }
 
+// The sign-in token. localStorage keeps it across reloads; it is sent as a Bearer header, never a cookie,
+// so there is no CSRF surface.
+const TOKEN_KEY = 'relay.token';
+export const auth = {
+  get: () => {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set: (t: string | null) => {
+    try {
+      if (t) localStorage.setItem(TOKEN_KEY, t);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage blocked: the session lasts until reload */
+    }
+    window.dispatchEvent(new Event('relay:auth'));
+  },
+};
+
 export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   let res: Response;
+  const headers: Record<string, string> = {};
+  if (init?.body !== undefined) headers['content-type'] = 'application/json';
+  const token = auth.get();
+  if (token) headers.authorization = `Bearer ${token}`;
   try {
     res = await fetch(`/api${path}`, {
       method: init?.method ?? 'GET',
-      headers: init?.body !== undefined ? { 'content-type': 'application/json' } : undefined,
+      headers,
       body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
   } catch {
@@ -146,6 +196,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   }
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
+  if (res.status === 401 && token) auth.set(null); // expired or invalid: back to the sign-in screen
   if (!res.ok) {
     const e = data?.error;
     throw new ApiError(res.status, e?.code ?? 'UNKNOWN', e?.message ?? `Request failed (${res.status})`, e?.details, e?.requestId);

@@ -1,7 +1,7 @@
 import type { ConflictStatus } from '@prisma/client';
 import { prisma } from '../db.js';
-import { notFound } from '../errors.js';
 import { logger } from '../logger.js';
+import { conflictWhere, covers, loadDirectory, loadSessionScope, scopeInclude, sessionAudience, toScope, type Viewer } from '../access.js';
 import { embedTexts, generateJson, isAiAvailable } from '../ai/client.js';
 import { CONFLICT_SYSTEM, conflictSchema } from '../ai/prompts.js';
 import { rankCandidates } from '../lib/similarity.js';
@@ -27,10 +27,19 @@ export async function checkConflicts(sessionId: string) {
     logger.warn({ event: 'conflicts.skipped', sessionId }, 'conflict check skipped: AI unavailable');
     return { found: 0, checked: false };
   }
-  const past = await prisma.decision.findMany({
-    where: { sessionId: { not: sessionId } },
-    include: { session: { select: { title: true, scheduledAt: true } } },
-  });
+  // Only compare with earlier decisions that everyone who can see this session can also see;
+  // otherwise the explanation would quote a private decision to people outside it.
+  const [dir, scope, allPast] = await Promise.all([
+    loadDirectory(),
+    loadSessionScope(sessionId),
+    prisma.decision.findMany({
+      where: { sessionId: { not: sessionId } },
+      include: { session: { select: { title: true, scheduledAt: true, visibility: true, teamId: true, ...scopeInclude } } },
+    }),
+  ]);
+  const audience = sessionAudience(scope, dir);
+  const past = allPast.filter((p) => covers(sessionAudience(toScope(p.session), dir), audience));
+  if (allPast.length !== past.length) logger.info({ event: 'conflicts.scoped', sessionId, hidden: allPast.length - past.length }, 'decisions outside the audience excluded');
   if (past.length === 0) return { found: 0, checked: true };
 
   const vectors = await embedTexts('conflicts.embed', [...fresh, ...past].map((d) => d.text));
@@ -64,13 +73,15 @@ export async function checkConflicts(sessionId: string) {
   return { found: kept.length, checked: true };
 }
 
-export function listConflicts(status?: ConflictStatus) {
-  return prisma.decisionConflict.findMany({ where: status ? { status } : undefined, include: conflictInclude, orderBy: { createdAt: 'desc' } });
+export function listConflicts(status: ConflictStatus | undefined, viewer: Viewer) {
+  return prisma.decisionConflict.findMany({
+    where: { ...(status ? { status } : {}), AND: [conflictWhere(viewer)] },
+    include: conflictInclude,
+    orderBy: { createdAt: 'desc' },
+  });
 }
 
 export async function resolveConflict(id: string, status: ConflictStatus, resolution?: string) {
-  const c = await prisma.decisionConflict.findUnique({ where: { id } });
-  if (!c) throw notFound('Conflict');
   const updated = await prisma.decisionConflict.update({ where: { id }, data: { status, resolution }, include: conflictInclude });
   logger.info({ event: 'conflict.updated', conflictId: id, status }, 'decision conflict updated');
   return updated;

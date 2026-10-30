@@ -87,7 +87,8 @@ export async function applyRecap(sessionId: string, input: ApplyRecapInput) {
   const updates = input.actionItems.filter((a) => a.existingItemId);
   const creates = input.actionItems.filter((a) => !a.existingItemId);
   if (updates.length) {
-    const found = await prisma.actionItem.count({ where: { id: { in: updates.map((u) => u.existingItemId!) } } });
+    // Must be items of this session: a client could otherwise update any item by sending its id.
+    const found = await prisma.actionItem.count({ where: { id: { in: updates.map((u) => u.existingItemId!) }, sessionId } });
     if (found !== new Set(updates.map((u) => u.existingItemId)).size) throw new AppError(400, 'INVALID_REFERENCE', 'An existing item in the recap no longer exists');
   }
 

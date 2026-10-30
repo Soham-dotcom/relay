@@ -2,7 +2,7 @@
 
 **AI-powered knowledge and task hand-over for teams.** Relay captures what was discussed and decided in a meeting or a work transfer, hands that context to the right people, and follows every action item until it is closed with an outcome.
 
-> **Live demo: https://relay-h9qf.onrender.com** (seeded with a demo team; no login needed). The free tier sleeps when idle, so the first request can take ~30-50 s.
+> **Live demo: https://relay-h9qf.onrender.com**. Pick a demo person on the sign-in screen (no password) and switch people to see the access rules work. The free tier sleeps when idle, so the first request can take ~30-50 s.
 
 Teams lose context every time work changes hands: someone misses a meeting, a colleague goes on leave, last week's action item never reaches this week's agenda. Relay is built around those three moments.
 
@@ -14,6 +14,7 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 | Never lose an open item | **Lifecycle tracking**: Open → In progress → Blocked → Done / Dropped, with owner and due date. **Carry forward** moves open items to the next session and keeps their full history. An item cannot be closed without an **outcome** |
 | Find the background | **Knowledge base**: team documents + every held meeting. AI links items and decisions to the documents that help, and says why |
 | ★ Avoid acting on a reversed decision | **Decision conflict check** (special feature, below) |
+| Share the right context with the right people | **Access control**: every session and document is 🔒 Private, 👥 Team or 🌐 Organisation. The server enforces it on every query, and the AI respects it too (below) |
 
 ## ★ Special feature: decision conflict check
 
@@ -29,6 +30,32 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 **How it stays reliable.** Two stages: cheap retrieval (embeddings, or keyword overlap if embeddings fail) picks the 5 most related earlier decisions, and only those pairs go to the model. The model can only answer about ids it was sent (any other id is dropped), and only conflicts with confidence ≥ 0.6 are stored. With no AI available, Relay stores **no** conflicts rather than guessing with rules: a false alarm costs more trust than a missed one.
 
 The seeded demo already contains this conflict (Payments weekly sync, 28 Oct).
+
+## Access control: the right context for the right people
+
+Handing context over is only safe if it doesn't hand it to the wrong people. A leave hand-over or a 1-on-1 is private; a squad's weekly sync is for the squad; a release process is for everyone.
+
+| Level | Who can see it | Demo example |
+|---|---|---|
+| 🔒 Private | Session: its participants. Document: its author | Rahul's leave hand-over to Priya; Rahul's private hand-over notes |
+| 👥 Team | Members of the owning team (plus the session's participants) | Payments weekly syncs; Support weekly triage |
+| 🌐 Organisation | Everyone | "Release process", "Customer escalation policy" |
+
+Action items follow their session, and **people always see their own items**, even from a session they can't open. Visibility is chosen when a session or document is created and can't be changed later (see below for why).
+
+**Sign-in.** A demo picker ("sign in as Priya / Kavya / …") issues a signed JWT (HS256, 8 h). The browser sends it as a Bearer header; every `/api` route except health and sign-in requires it. The user and their teams are re-read from the database on each request, so a team change applies immediately. A real deployment would swap the picker for SSO; nothing else changes.
+
+**Enforced on the server, not the screen.** All rules live in one file (`server/src/access.ts`):
+- three query filters (`sessionWhere`, `docWhere`, `itemWhere`) that every list, detail, search and item query adds;
+- guards on every session/item/document/conflict route. A record you can't see returns **404, not 403**, so its existence isn't revealed, and an `access.denied` event is logged with the viewer and the resource.
+
+**The AI respects it too.** This is the subtle part: the AI combines records, and a combination can leak.
+- **Catch-up brief:** the fact sheet sent to the model only contains what both the person asking and the reader can see. A brief for someone who can't see the session is refused (`READER_NO_ACCESS`).
+- **Knowledge linking:** a document is only a candidate if *everyone who can see the item can also see the document*. Otherwise a private doc's title and the AI's reason would appear on a team item.
+- **Conflict check:** a new decision is only compared with earlier decisions its whole audience can see. Otherwise the explanation would quote a private decision to the team.
+- Because links and conflicts are created audience-safe and visibility can't change afterwards, showing them later needs no extra checks. Org-wide documents still filter their "linked to" list per viewer, since an org doc can be linked to a team decision.
+
+Try it: sign in as **Aisha** (Payments: 4 sessions), **Kavya** (Support: only the support triage plus the 2 org documents), **Neha** (in both teams: sees both), or **Rahul** / **Priya** (the only ones who see the private hand-over).
 
 ## Tech stack
 
@@ -71,11 +98,13 @@ Open http://localhost:5173. To run it the way production does (one port): `npm r
 
 ```bash
 cd server
-npm test          # 18 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
+npm test          # 27 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
 npm run typecheck
 ```
 
 The AI is replaced by a scripted fake in tests, so they are fast, free and deterministic. They cover validation errors, the outcome-required rule, carry-forward history, recap drafting and owner matching, recognising already-open items instead of duplicating them, AI retry and failure, the fallback brief, and the conflict check rejecting invented ids and low-confidence answers.
+
+Nine access-control tests check: no token → 401; a private session is a 404 for a teammate outside it (and every action on it is guarded); team sessions are invisible to other teams while org sessions are visible to all; you can't create for a team you're not in; owners always see their own items; org / team / private documents per person; **the brief never includes items the requester can't see**, and can't be written for a reader without access; **knowledge linking never suggests a doc the item's audience can't see**; **the conflict prompt never contains a decision outside the audience**.
 
 ## AI configuration
 
@@ -108,16 +137,17 @@ The AI is replaced by a scripted fake in tests, so they are fast, free and deter
 
 ## Data
 
-- **Schema** (`server/prisma/schema.prisma`): `Person`, `Session` (meeting or transfer, with `previousId` forming a chain), `Participant` (attendance), `Decision`, `ActionItem` (owner, due date, status, outcome, origin session and current session), `ItemEvent` (append-only history), `KnowledgeDoc` (with embedding), `KnowledgeLink` (with AI reason), `DecisionConflict`.
+- **Schema** (`server/prisma/schema.prisma`): `Person`, `Team` + `TeamMember`, `Session` (meeting or transfer, with `visibility` + owning `teamId`, and `previousId` forming a chain), `Participant` (attendance), `Decision`, `ActionItem` (owner, due date, status, outcome, origin session and current session), `ItemEvent` (append-only history), `KnowledgeDoc` (with embedding, `visibility`, `teamId`, author), `KnowledgeLink` (with AI reason), `DecisionConflict`.
 - **History is append-only.** Every create, status change, reassignment, due-date change, carry-forward and outcome writes an `ItemEvent`, so an item's whole life can be replayed.
 - **Integrity rules in the service layer:** an item can't close without an outcome (422); a session can't close with open items (409); a transfer needs two different people; people and sessions must exist (400/404). Multi-row changes run in transactions.
-- **Demo data** (`npm run db:seed`): a 5-person payments team over three weekly syncs, a planned next sync, and one work transfer (Rahul going on leave). It includes items carried forward three times, an overdue blocked item, closed items with outcomes, a dropped item with its reason, an unassigned item, 5 knowledge documents with links, and the launch-date conflict.
+- **Demo data** (`npm run db:seed`): two teams. **Payments squad** (5 people): three weekly syncs, a planned next sync, and a **private** work transfer (Rahul going on leave, visible only to Rahul and Priya). **Customer support** (Kavya, Arjun): a weekly triage only they can see. Neha (product) is in both teams. It includes items carried forward three times, an overdue blocked item, closed items with outcomes, a dropped item with its reason, an unassigned item, 8 documents (team, org-wide and one private draft) with links, and the launch-date conflict.
 
 ## Logging
 
 - **Library:** pino, JSON lines, written to **stdout and `server/logs/app.log`** (`LOG_FILE`).
 - **Levels:** `info` for normal events, `warn` for rejected requests (4xx) and AI retries/fallbacks, `error` for 5xx and AI giving up. `LOG_LEVEL` sets the minimum.
-- **Correlation ID:** each request gets an `x-request-id` (the caller's, if it is safe, else a UUID). It is returned in the response header and in every error body, and an AsyncLocalStorage mixin stamps it on **every log line** written during that request, including AI calls and service events.
+- **Correlation ID:** each request gets an `x-request-id` (the caller's, if it is safe, else a UUID). It is returned in the response header and in every error body, and an AsyncLocalStorage mixin stamps it on **every log line** written during that request, including AI calls and service events. Once signed in, every line also carries the `userId`.
+- **Security events:** `auth.login`, `auth.invalid_token`, and `access.denied` (warn) with the viewer, resource type and id whenever someone asks for a record they can't see.
 - **Key events** (field `event`): `session.created`, `session.status_changed`, `item.created`, `item.reassigned`, `item.status_changed`, `item.closed`, `items.carried_forward`, `recap.applied`, `kb.doc_created`, `kb.linked`, `conflict.detected`, `conflict.updated`, `brief.generated`.
 - **AI calls** (`event: ai.call` / `ai.embed`): operation, model, attempt, `latencyMs`, `outcome` (`ok`, `invalid_output`, `error`).
 - **Errors** are logged with the stack, status, code, method and path.
@@ -130,13 +160,15 @@ Example line:
 
 ## API
 
-All endpoints are under `/api`. Errors always look like `{ "error": { "code", "message", "details?", "requestId" } }`.
+All endpoints are under `/api`. Errors always look like `{ "error": { "code", "message", "details?", "requestId" } }`. Everything except health and the two sign-in routes needs `Authorization: Bearer <token>` (401 otherwise), and returns only what that user may see.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /health` | DB check + whether AI is configured |
+| `GET /health` | DB check + whether AI is configured (public) |
+| `GET /auth/people`, `POST /auth/login` | Demo sign-in: list people / get a signed token for one (public) |
+| `GET /auth/me` | The signed-in user and their teams |
 | `GET/POST /people` | List / add people |
-| `GET/POST /sessions` | List (filter `kind`, `status`) / create (optionally `carryFromId`, initial `actionItems`) |
+| `GET/POST /sessions` | List (filter `kind`, `status`) / create (`visibility`, `teamId`, optionally `carryFromId`, initial `actionItems`) |
 | `GET/PATCH/DELETE /sessions/:id` | Detail / update (title, date, status, agenda, notes) / delete |
 | `PUT/DELETE /sessions/:id/participants/:personId` | Set attendance / remove |
 | `POST /sessions/:id/items` | Add an action item |
@@ -157,19 +189,22 @@ All endpoints are under `/api`. Errors always look like `{ "error": { "code", "m
 3. **The database is the source of truth, the AI only reads it.** The brief is generated from a fact sheet the server builds, so it can't mention things that aren't recorded, and the same fact sheet produces the no-AI fallback.
 4. **Retrieve, then reason.** For linking and conflicts, cheap retrieval narrows the field and the model only judges a few candidates. That keeps prompts small, cost low, and the model's choices checkable.
 5. **One deployable.** Express serves the built React app, so production is one service and one URL, with no CORS.
+6. **Access is a server rule, and the AI is a reader like any other.** Every query filters by what the user can see, and every AI prompt is built only from what its audience can see.
 
 Layout: `server/src/routes.ts` (HTTP + validation) → `server/src/services/*` (business rules, transactions, events) → Prisma. AI code lives in `server/src/ai/` (provider, client with retry/validation/logging, prompts and schemas).
 
 ## Assumptions
 
-- One team, trusted users: there is no login. Anyone with the URL can view and edit (see limitations).
+- Demo sign-in: anyone can sign in as any demo person (that's the point of the demo). Inside a team everyone may edit the team's sessions; there are no per-person edit roles.
 - People are a small team list managed in the app. Email invites and calendars are out of scope; "missed" is recorded by hand.
 - Unstructured input arrives as pasted text (notes, chat, email, transcript). A recording must be transcribed first.
 - Dates are calendar dates; times and time zones are not modelled.
 
 ## Known limitations
 
-- **No authentication or permissions.** The next step would be login plus per-team scoping.
+- **Demo sign-in, not real authentication.** The JWT, the server-side checks and the audience rules are real, but the picker lets anyone become anyone. Production would put SSO (Google / Microsoft) in front of `POST /auth/login`.
+- **Visibility is fixed at creation** (by design: AI links and conflicts were computed for the original audience). Changing it would need those to be re-checked.
+- **No edit roles.** Anyone who can see a session can edit it; a team admin role would be the next step.
 - **No audio upload / transcription**, and no Slack/Gmail/Calendar connectors; input is pasted text.
 - **Retrieval is in-memory.** Embeddings are stored in Postgres but compared in Node, which is fine for hundreds of documents. At scale, move to `pgvector` with an index.
 - **AI quality is not measured with a labelled set.** Outputs are schema-checked and reviewed by the user, but there is no accuracy number yet.
@@ -180,6 +215,6 @@ Layout: `server/src/routes.ts` (HTTP + validation) → `server/src/services/*` (
 ## Deploy (Render + Neon)
 
 1. **Neon:** create a project at https://neon.tech and copy the connection string (use the *direct* connection, not the `-pooler` host, so Prisma migrations work).
-2. **Render:** New → Blueprint → pick this repo. `render.yaml` defines one web service. Set `DATABASE_URL` (Neon) and `GEMINI_API_KEY`.
+2. **Render:** New → Blueprint → pick this repo. `render.yaml` defines one web service. Set `DATABASE_URL` (Neon) and `GEMINI_API_KEY`; Render generates `JWT_SECRET` (required when `NODE_ENV=production`).
 3. The start command runs `prisma migrate deploy` and then the server. To load the demo data once, run from your machine: `DATABASE_URL=<neon url> npm run db:seed --prefix server`.
 4. Health check: `GET /api/health`.

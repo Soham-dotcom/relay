@@ -13,9 +13,14 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   LOG_FILE: z.string().default('logs/app.log'),
   WEB_DIST: z.string().optional(),
+  // Signs login tokens. Must be set (and secret) in production; a fixed value is fine locally.
+  JWT_SECRET: z.string().min(16).optional(),
+  JWT_TTL: z.string().default('8h'),
 });
 
-const parsed = schema.safeParse(process.env);
+const parsed = schema
+  .refine((c) => c.NODE_ENV !== 'production' || Boolean(c.JWT_SECRET), { message: 'JWT_SECRET is required in production', path: ['JWT_SECRET'] })
+  .safeParse(process.env);
 if (!parsed.success) {
   // Fail fast at boot with a readable message instead of a crash deep inside a request.
   console.error('Invalid environment configuration:', parsed.error.flatten().fieldErrors);
@@ -23,4 +28,5 @@ if (!parsed.success) {
 }
 
 export const config = parsed.data;
+export const jwtSecret = config.JWT_SECRET ?? 'local-dev-secret-not-for-production';
 export const aiEnabled = Boolean(config.GEMINI_API_KEY);

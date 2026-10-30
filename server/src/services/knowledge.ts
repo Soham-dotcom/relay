@@ -1,42 +1,72 @@
+import type { Visibility } from '@prisma/client';
 import { prisma } from '../db.js';
-import { notFound } from '../errors.js';
+import { AppError } from '../errors.js';
 import { logger } from '../logger.js';
 import { embedTexts, generateJson, isAiAvailable } from '../ai/client.js';
 import { LINK_SYSTEM, linkSchema } from '../ai/prompts.js';
 import { rankCandidates } from '../lib/similarity.js';
+import {
+  covers,
+  docAudience,
+  docWhere,
+  itemWhere,
+  loadDirectory,
+  loadSessionScope,
+  scopeInclude,
+  sessionAudience,
+  sessionWhere,
+  toScope,
+  type Viewer,
+} from '../access.js';
 
 const SNIPPET = 500;
 const CANDIDATES_PER_TARGET = 4;
 /** Below this, an automatic (non-AI) match is too weak to show. */
 const FALLBACK_MIN_SCORE = 0.35;
 
-export async function createDoc(title: string, content: string) {
-  const [vector] = (await embedTexts('kb.embed_doc', [`${title}\n${content}`])) ?? [[]];
-  const doc = await prisma.knowledgeDoc.create({ data: { title, content, embedding: vector } });
-  logger.info({ event: 'kb.doc_created', docId: doc.id, embedded: vector.length > 0 }, 'knowledge doc created');
+export async function createDoc(input: { title: string; content: string; visibility: Visibility; teamId?: string | null }, viewer: Viewer) {
+  if (input.visibility === 'TEAM' && !input.teamId) throw new AppError(400, 'TEAM_REQUIRED', 'Choose the team this document belongs to');
+  if (input.teamId && !viewer.teamIds.includes(input.teamId)) throw new AppError(400, 'INVALID_TEAM', 'You can only add documents for a team you belong to');
+  const [vector] = (await embedTexts('kb.embed_doc', [`${input.title}\n${input.content}`])) ?? [[]];
+  const doc = await prisma.knowledgeDoc.create({
+    data: {
+      title: input.title,
+      content: input.content,
+      visibility: input.visibility,
+      teamId: input.visibility === 'TEAM' ? input.teamId : null,
+      createdById: viewer.id,
+      embedding: vector,
+    },
+  });
+  logger.info({ event: 'kb.doc_created', docId: doc.id, visibility: doc.visibility, embedded: vector.length > 0 }, 'knowledge doc created');
   return doc;
 }
 
 export async function deleteDoc(id: string) {
-  const doc = await prisma.knowledgeDoc.findUnique({ where: { id } });
-  if (!doc) throw notFound('Document');
   await prisma.knowledgeDoc.delete({ where: { id } });
   logger.info({ event: 'kb.doc_deleted', docId: id }, 'knowledge doc deleted');
 }
 
-export function listDocs(q?: string) {
+export function listDocs(q: string | undefined, viewer: Viewer) {
   return prisma.knowledgeDoc.findMany({
-    where: q
-      ? { OR: [{ title: { contains: q, mode: 'insensitive' } }, { content: { contains: q, mode: 'insensitive' } }] }
-      : undefined,
+    where: {
+      AND: [
+        docWhere(viewer),
+        q ? { OR: [{ title: { contains: q, mode: 'insensitive' } }, { content: { contains: q, mode: 'insensitive' } }] } : {},
+      ],
+    },
     select: {
       id: true,
       title: true,
       content: true,
       source: true,
+      visibility: true,
+      team: { select: { id: true, name: true } },
       sessionId: true,
       createdAt: true,
+      // An org-wide doc can be linked to a team decision; only show links to things this viewer can see.
       links: {
+        where: { OR: [{ item: itemWhere(viewer) }, { decision: { session: sessionWhere(viewer) } }] },
         include: {
           item: { select: { id: true, title: true, status: true } },
           decision: { select: { id: true, text: true, sessionId: true } },
@@ -47,13 +77,12 @@ export function listDocs(q?: string) {
   });
 }
 
-/** Turns a held session into a knowledge doc, so later meetings can be linked to it. */
+/** Turns a held session into a knowledge doc, so later meetings can be linked to it. Access follows the session. */
 export async function indexSession(sessionId: string) {
-  const s = await prisma.session.findUnique({
+  const s = await prisma.session.findUniqueOrThrow({
     where: { id: sessionId },
     include: { decisions: true, items: { include: { owner: true } } },
   });
-  if (!s) throw notFound('Session');
   const content = [
     `${s.kind === 'TRANSFER' ? 'Work transfer' : 'Meeting'} on ${s.scheduledAt.toISOString().slice(0, 10)}`,
     s.summary ? `Summary: ${s.summary}` : '',
@@ -63,10 +92,11 @@ export async function indexSession(sessionId: string) {
     .filter(Boolean)
     .join('\n\n');
   const [vector] = (await embedTexts('kb.embed_session', [`${s.title}\n${content}`])) ?? [[]];
+  const scope = { title: s.title, content, embedding: vector, visibility: s.visibility, teamId: s.teamId };
   await prisma.knowledgeDoc.upsert({
     where: { sessionId },
-    create: { title: s.title, content, source: 'MEETING', sessionId, embedding: vector },
-    update: { title: s.title, content, embedding: vector },
+    create: { ...scope, source: 'MEETING', sessionId, createdById: s.createdById },
+    update: scope,
   });
 }
 
@@ -80,12 +110,23 @@ export interface LinkTarget {
  * Two stages: cheap retrieval (embeddings, or keywords when embeddings fail) picks a few candidate
  * docs per target, then the model keeps only the useful ones and explains why. The model can only
  * choose among the candidates we gave it; any other id is dropped.
+ *
+ * Candidates are limited to docs that everyone who can see the session can also see. Otherwise a
+ * private doc's title and the AI's reason would show up on a team-wide item.
  */
-export async function linkToKnowledge(targets: LinkTarget[], excludeSessionId?: string) {
+export async function linkToKnowledge(targets: LinkTarget[], sessionId: string) {
   if (targets.length === 0) return { created: 0, mode: 'none' as const };
-  const docs = await prisma.knowledgeDoc.findMany({
-    where: excludeSessionId ? { OR: [{ sessionId: null }, { sessionId: { not: excludeSessionId } }] } : undefined,
-  });
+  const [dir, scope, allDocs] = await Promise.all([
+    loadDirectory(),
+    loadSessionScope(sessionId),
+    prisma.knowledgeDoc.findMany({
+      where: { OR: [{ sessionId: null }, { sessionId: { not: sessionId } }] },
+      include: { session: { select: { visibility: true, teamId: true, ...scopeInclude } } },
+    }),
+  ]);
+  const audience = sessionAudience(scope, dir);
+  const docs = allDocs.filter((d) => covers(docAudience({ ...d, session: d.session ? toScope(d.session) : null }, dir), audience));
+  if (allDocs.length !== docs.length) logger.info({ event: 'kb.link_scoped', sessionId, hidden: allDocs.length - docs.length }, 'docs outside the audience excluded from linking');
   if (docs.length === 0) return { created: 0, mode: 'none' as const };
 
   const vectors = await embedTexts('kb.embed_targets', targets.map((t) => t.text));

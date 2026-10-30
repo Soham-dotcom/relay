@@ -1,7 +1,10 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { prisma } from './db.js';
 import { isAiAvailable } from './ai/client.js';
+import { assertConflictVisible, assertDocVisible, assertItemVisible, assertSessionVisible, type Viewer } from './access.js';
+import { issueToken, requireAuth, viewerOf } from './auth.js';
+import { AppError } from './errors.js';
 import { catchUpBrief } from './services/brief.js';
 import { listConflicts, resolveConflict } from './services/conflicts.js';
 import { carryForward, createItem, getItem, listItems, updateItem } from './services/items.js';
@@ -14,17 +17,54 @@ const id = z.string().min(1).max(40);
 const text = (max: number) => z.string().trim().max(max);
 const date = z.coerce.date().refine((d) => !Number.isNaN(d.getTime()), 'Invalid date');
 const status = z.enum(['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'DROPPED']);
+const visibility = z.enum(['PRIVATE', 'TEAM', 'ORG']);
 const newItem = z.object({
   title: text(300).min(1),
   ownerId: id.nullish(),
   dueDate: date.nullish(),
 });
 
+/** Parses :id and 404s unless the signed-in user may see that session. */
+async function visibleSession(req: Request): Promise<[string, Viewer]> {
+  const v = viewerOf(req);
+  const sid = id.parse(req.params.id);
+  await assertSessionVisible(v, sid);
+  return [sid, v];
+}
+
 export const api = Router();
 
+// ---------- Public: health and sign-in ----------
 api.get('/health', async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
   res.json({ ok: true, ai: isAiAvailable() ? 'configured' : 'not configured' });
+});
+
+/** Demo sign-in: pick a person and get a signed token. A real deployment would use SSO here. */
+api.get('/auth/people', async (_req, res) => {
+  const people = await prisma.person.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, role: true, memberships: { select: { team: { select: { id: true, name: true } } } } },
+  });
+  res.json(people.map(({ memberships, ...p }) => ({ ...p, teams: memberships.map((m) => m.team) })));
+});
+api.post('/auth/login', async (req, res) => {
+  const { personId } = z.object({ personId: id }).parse(req.body);
+  const person = await prisma.person.findUnique({ where: { id: personId } });
+  if (!person) throw new AppError(400, 'UNKNOWN_PERSON', 'No such person');
+  logger.info({ event: 'auth.login', personId }, 'signed in');
+  res.json({ token: issueToken(person.id) });
+});
+
+api.use(requireAuth);
+
+api.get('/auth/me', async (req, res) => {
+  const v = viewerOf(req);
+  const person = await prisma.person.findUniqueOrThrow({
+    where: { id: v.id },
+    include: { memberships: { include: { team: { select: { id: true, name: true } } } } },
+  });
+  res.json({ id: person.id, name: person.name, role: person.role, teams: person.memberships.map((m) => m.team) });
 });
 
 // ---------- People ----------
@@ -41,7 +81,7 @@ api.post('/people', async (req, res) => {
 // ---------- Sessions (meetings and work transfers) ----------
 api.get('/sessions', async (req, res) => {
   const q = z.object({ kind: z.enum(['MEETING', 'TRANSFER']).optional(), status: z.enum(['PLANNED', 'HELD', 'CLOSED']).optional() }).parse(req.query);
-  res.json(await sessions.listSessions(q));
+  res.json(await sessions.listSessions(q, viewerOf(req)));
 });
 api.post('/sessions', async (req, res) => {
   const body = z
@@ -49,6 +89,8 @@ api.post('/sessions', async (req, res) => {
       kind: z.enum(['MEETING', 'TRANSFER']).default('MEETING'),
       title: text(200).min(1),
       scheduledAt: date,
+      visibility: visibility.default('TEAM'),
+      teamId: id.nullish(),
       agenda: text(5000).optional(),
       notes: text(20000).optional(),
       participantIds: z.array(id).max(50).default([]),
@@ -58,12 +100,14 @@ api.post('/sessions', async (req, res) => {
       actionItems: z.array(newItem).max(50).optional(),
     })
     .parse(req.body);
-  res.status(201).json(await sessions.createSession(body));
+  res.status(201).json(await sessions.createSession(body, viewerOf(req)));
 });
 api.get('/sessions/:id', async (req, res) => {
-  res.json(await sessions.getSession(id.parse(req.params.id)));
+  const [sid, v] = await visibleSession(req);
+  res.json(await sessions.getSession(sid, v));
 });
 api.patch('/sessions/:id', async (req, res) => {
+  const [sid, v] = await visibleSession(req);
   const body = z
     .object({
       title: text(200).min(1).optional(),
@@ -75,36 +119,45 @@ api.patch('/sessions/:id', async (req, res) => {
     })
     .strict()
     .parse(req.body);
-  res.json(await sessions.updateSession(id.parse(req.params.id), body));
+  res.json(await sessions.updateSession(sid, body, v));
 });
 api.delete('/sessions/:id', async (req, res) => {
-  await sessions.deleteSession(id.parse(req.params.id));
+  const [sid] = await visibleSession(req);
+  await sessions.deleteSession(sid);
   res.status(204).end();
 });
 api.put('/sessions/:id/participants/:personId', async (req, res) => {
+  const [sid, v] = await visibleSession(req);
   const { attendance } = z.object({ attendance: z.enum(['INVITED', 'ATTENDED', 'MISSED']) }).parse(req.body);
-  res.json(await sessions.setAttendance(id.parse(req.params.id), id.parse(req.params.personId), attendance));
+  res.json(await sessions.setAttendance(sid, id.parse(req.params.personId), attendance, v));
 });
 api.delete('/sessions/:id/participants/:personId', async (req, res) => {
-  res.json(await sessions.removeParticipant(id.parse(req.params.id), id.parse(req.params.personId)));
+  const [sid, v] = await visibleSession(req);
+  res.json(await sessions.removeParticipant(sid, id.parse(req.params.personId), v));
 });
 api.post('/sessions/:id/items', async (req, res) => {
-  res.status(201).json(await createItem(id.parse(req.params.id), newItem.parse(req.body)));
+  const [sid] = await visibleSession(req);
+  res.status(201).json(await createItem(sid, newItem.parse(req.body)));
 });
 api.post('/sessions/:id/carry-forward', async (req, res) => {
+  const [sid, v] = await visibleSession(req);
   const { toSessionId } = z.object({ toSessionId: id }).parse(req.body);
-  res.json(await carryForward(id.parse(req.params.id), toSessionId));
+  await assertSessionVisible(v, toSessionId);
+  res.json(await carryForward(sid, toSessionId));
 });
 api.post('/sessions/:id/transfer-items', async (req, res) => {
-  res.json(await sessions.transferItems(id.parse(req.params.id)));
+  const [sid] = await visibleSession(req);
+  res.json(await sessions.transferItems(sid));
 });
 
 // ---------- AI: recap, brief ----------
 api.post('/sessions/:id/recap/draft', async (req, res) => {
+  const [sid] = await visibleSession(req);
   const { raw } = z.object({ raw: text(30000).min(20, 'Paste at least a few sentences to recap') }).parse(req.body);
-  res.json(await draftRecap(id.parse(req.params.id), raw));
+  res.json(await draftRecap(sid, raw));
 });
 api.post('/sessions/:id/recap/apply', async (req, res) => {
+  const [sid] = await visibleSession(req);
   const body = z
     .object({
       summary: text(5000).min(1),
@@ -113,11 +166,12 @@ api.post('/sessions/:id/recap/apply', async (req, res) => {
       actionItems: z.array(newItem.extend({ existingItemId: id.nullish() })).max(40),
     })
     .parse(req.body);
-  res.json(await applyRecap(id.parse(req.params.id), body));
+  res.json(await applyRecap(sid, body));
 });
 api.post('/sessions/:id/brief', async (req, res) => {
+  const [sid, v] = await visibleSession(req);
   const { readerId } = z.object({ readerId: id.optional() }).parse(req.body ?? {});
-  res.json(await catchUpBrief(id.parse(req.params.id), readerId));
+  res.json(await catchUpBrief(sid, v, readerId));
 });
 
 // ---------- Action items ----------
@@ -130,12 +184,16 @@ api.get('/items', async (req, res) => {
       overdue: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
     })
     .parse(req.query);
-  res.json(await listItems(q));
+  res.json(await listItems(q, viewerOf(req)));
 });
 api.get('/items/:id', async (req, res) => {
-  res.json(await getItem(id.parse(req.params.id)));
+  const itemId = id.parse(req.params.id);
+  await assertItemVisible(viewerOf(req), itemId);
+  res.json(await getItem(itemId));
 });
 api.patch('/items/:id', async (req, res) => {
+  const itemId = id.parse(req.params.id);
+  await assertItemVisible(viewerOf(req), itemId);
   const body = z
     .object({
       title: text(300).min(1).optional(),
@@ -146,34 +204,42 @@ api.patch('/items/:id', async (req, res) => {
     })
     .strict()
     .parse(req.body);
-  res.json(await updateItem(id.parse(req.params.id), body));
+  res.json(await updateItem(itemId, body));
 });
 api.post('/items/:id/link', async (req, res) => {
-  const item = await getItem(id.parse(req.params.id));
-  const result = await linkToKnowledge([{ kind: 'item', id: item.id, text: item.title }], item.originSessionId);
+  const itemId = id.parse(req.params.id);
+  await assertItemVisible(viewerOf(req), itemId);
+  const item = await getItem(itemId);
+  const result = await linkToKnowledge([{ kind: 'item', id: item.id, text: item.title }], item.sessionId);
   res.json({ ...result, item: await getItem(item.id) });
 });
 
 // ---------- Knowledge base ----------
 api.get('/knowledge', async (req, res) => {
   const { q } = z.object({ q: text(200).optional() }).parse(req.query);
-  res.json(await listDocs(q || undefined));
+  res.json(await listDocs(q || undefined, viewerOf(req)));
 });
 api.post('/knowledge', async (req, res) => {
-  const body = z.object({ title: text(200).min(1), content: text(50000).min(1) }).parse(req.body);
-  res.status(201).json(await createDoc(body.title, body.content));
+  const body = z
+    .object({ title: text(200).min(1), content: text(50000).min(1), visibility: visibility.default('TEAM'), teamId: id.nullish() })
+    .parse(req.body);
+  res.status(201).json(await createDoc(body, viewerOf(req)));
 });
 api.delete('/knowledge/:id', async (req, res) => {
-  await deleteDoc(id.parse(req.params.id));
+  const docId = id.parse(req.params.id);
+  await assertDocVisible(viewerOf(req), docId);
+  await deleteDoc(docId);
   res.status(204).end();
 });
 
 // ---------- Decision conflicts (special feature) ----------
 api.get('/conflicts', async (req, res) => {
   const q = z.object({ status: z.enum(['OPEN', 'DISMISSED', 'RESOLVED']).optional() }).parse(req.query);
-  res.json(await listConflicts(q.status));
+  res.json(await listConflicts(q.status, viewerOf(req)));
 });
 api.patch('/conflicts/:id', async (req, res) => {
+  const conflictId = id.parse(req.params.id);
+  await assertConflictVisible(viewerOf(req), conflictId);
   const body = z.object({ status: z.enum(['OPEN', 'DISMISSED', 'RESOLVED']), resolution: text(2000).optional() }).parse(req.body);
-  res.json(await resolveConflict(id.parse(req.params.id), body.status, body.resolution));
+  res.json(await resolveConflict(conflictId, body.status, body.resolution));
 });

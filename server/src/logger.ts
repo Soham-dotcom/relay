@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import pino from 'pino';
 import { config } from './config.js';
 
-/** Holds the request ID for the request being handled, so every log line carries it. */
-export const requestContext = new AsyncLocalStorage<{ requestId: string }>();
+/** Holds the request ID (and, once signed in, the user) so every log line carries them. */
+export const requestContext = new AsyncLocalStorage<{ requestId: string; userId?: string }>();
 
 const streams: pino.StreamEntry[] = [
   { level: config.LOG_LEVEL as pino.Level, stream: process.stdout },
@@ -23,7 +23,8 @@ export const logger = pino(
     // Attach the current request ID to every line logged inside a request.
     mixin() {
       const ctx = requestContext.getStore();
-      return ctx ? { requestId: ctx.requestId } : {};
+      if (!ctx) return {};
+      return ctx.userId ? { requestId: ctx.requestId, userId: ctx.userId } : { requestId: ctx.requestId };
     },
     // Never write secrets: auth headers, cookies, API keys, connection strings.
     redact: {

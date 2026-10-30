@@ -1,20 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type KnowledgeDoc } from '../api';
-import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, fmtDate } from '../ui';
+import { api, type KnowledgeDoc, type Visibility } from '../api';
+import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, VisibilityBadge, VisibilityPicker, fmtDate } from '../ui';
+import { useMe } from '../App';
 
 export default function KnowledgePage() {
   const qc = useQueryClient();
+  const me = useMe().data;
   const { hash } = useLocation();
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
-  const [form, setForm] = useState({ title: '', content: '' });
+  const blank = { title: '', content: '', visibility: 'TEAM' as Visibility, teamId: me?.teams[0]?.id ?? '' };
+  const [form, setForm] = useState(blank);
   const docs = useQuery({ queryKey: ['knowledge', query], queryFn: () => api<KnowledgeDoc[]>(`/knowledge${query ? `?q=${encodeURIComponent(query)}` : ''}`) });
   const add = useMutation({
-    mutationFn: () => api('/knowledge', { method: 'POST', body: form }),
+    mutationFn: () => api('/knowledge', { method: 'POST', body: { ...form, teamId: form.visibility === 'TEAM' ? form.teamId || null : null } }),
     onSuccess: () => {
-      setForm({ title: '', content: '' });
+      setForm(blank);
       qc.invalidateQueries({ queryKey: ['knowledge'] });
     },
   });
@@ -43,6 +46,7 @@ export default function KnowledgePage() {
             <article key={d.id} id={d.id} className={`rounded-lg border bg-white p-4 ${hash === `#${d.id}` ? 'border-teal-500 ring-2 ring-teal-500/20' : 'border-slate-200'}`}>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={d.source === 'MEETING' ? 'bg-sky-50 text-sky-700 ring-sky-200' : undefined}>{d.source === 'MEETING' ? 'Past meeting' : 'Document'}</Badge>
+                <VisibilityBadge visibility={d.visibility} team={d.team} />
                 <h2 className="font-medium text-slate-900">{d.title}</h2>
                 <span className="text-xs text-slate-500">{fmtDate(d.createdAt)}</span>
                 {d.source === 'DOCUMENT' ? (
@@ -76,6 +80,18 @@ export default function KnowledgePage() {
             <Field label="Content" hint="Paste a spec, runbook, decision record or notes.">
               <textarea className={inputCls} rows={8} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} required maxLength={50000} />
             </Field>
+            <Field label="Who can see it">
+              <div className="[&>div]:sm:grid-cols-1">
+                <VisibilityPicker value={form.visibility} onChange={(v) => setForm({ ...form, visibility: v })} privateHint="Only you" />
+              </div>
+            </Field>
+            {form.visibility === 'TEAM' && (me?.teams.length ?? 0) > 1 && (
+              <Field label="Team">
+                <select className={inputCls} value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
+                  {me?.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </Field>
+            )}
             <ErrorBox error={add.error} />
             <Button type="submit" busy={add.isPending}>Add document</Button>
           </form>

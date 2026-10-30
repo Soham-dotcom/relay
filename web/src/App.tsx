@@ -1,15 +1,41 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api, type Conflict } from './api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, auth, type Conflict, type Me } from './api';
 import SessionsPage from './pages/Sessions';
 import SessionPage from './pages/SessionDetail';
 import ItemsPage from './pages/Items';
 import KnowledgePage from './pages/Knowledge';
 import ConflictsPage from './pages/Conflicts';
+import SignIn from './pages/SignIn';
+import { Loading } from './ui';
 
 export default function App() {
+  const qc = useQueryClient();
+  const [token, setToken] = useState(auth.get());
+  useEffect(() => {
+    const onAuth = () => {
+      // A different user must never see the previous user's cached data.
+      qc.clear();
+      setToken(auth.get());
+    };
+    window.addEventListener('relay:auth', onAuth);
+    return () => window.removeEventListener('relay:auth', onAuth);
+  }, [qc]);
+
+  if (!token) return <SignIn />;
+  return <Shell />;
+}
+
+/** The signed-in user. Every page reads it from this cached query. */
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/auth/me'), staleTime: Infinity });
+
+function Shell() {
+  const me = useMe();
   const conflicts = useQuery({ queryKey: ['conflicts', 'OPEN'], queryFn: () => api<Conflict[]>('/conflicts?status=OPEN') });
   const health = useQuery({ queryKey: ['health'], queryFn: () => api<{ ai: string }>('/health') });
+
+  if (me.isLoading) return <Loading />;
 
   const nav = [
     { to: '/', label: 'Sessions', end: true },
@@ -39,9 +65,21 @@ export default function App() {
               </NavLink>
             ))}
           </nav>
-          <span className="ml-auto text-xs text-slate-500" title="Whether the server has an AI key configured">
-            AI: {health.data ? (health.data.ai === 'configured' ? <b className="text-emerald-700">on</b> : <b className="text-amber-700">off (fallback mode)</b>) : '…'}
-          </span>
+          <div className="ml-auto flex items-center gap-3 text-xs text-slate-500">
+            <span title="Whether the server has an AI key configured">
+              AI: {health.data ? (health.data.ai === 'configured' ? <b className="text-emerald-700">on</b> : <b className="text-amber-700">off (fallback)</b>) : '…'}
+            </span>
+            {me.data && (
+              <span className="flex items-center gap-2 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-slate-700">
+                <span>
+                  <b>{me.data.name}</b> · {me.data.teams.map((t) => t.name).join(' + ') || 'no team'}
+                </span>
+                <button onClick={() => auth.set(null)} className="rounded-full bg-white px-2 py-0.5 font-medium text-teal-700 ring-1 ring-slate-200 hover:bg-teal-50">
+                  Switch user
+                </button>
+              </span>
+            )}
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">

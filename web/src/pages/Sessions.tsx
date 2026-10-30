@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Person, type SessionKind, type SessionSummary } from '../api';
-import { Badge, Button, Empty, ErrorBox, Field, inputCls, Loading, Modal, StatusBadge, fmtDate } from '../ui';
+import { api, type Person, type SessionKind, type SessionSummary, type Visibility } from '../api';
+import { Badge, Button, Empty, ErrorBox, Field, inputCls, Loading, Modal, StatusBadge, VisibilityBadge, VisibilityPicker, fmtDate } from '../ui';
+import { useMe } from '../App';
 
 export default function SessionsPage() {
   const [kind, setKind] = useState<'' | SessionKind>('');
@@ -37,6 +38,7 @@ export default function SessionsPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={s.kind === 'TRANSFER' ? 'bg-violet-50 text-violet-700 ring-violet-200' : undefined}>{s.kind === 'TRANSFER' ? 'Work transfer' : 'Meeting'}</Badge>
                 <StatusBadge status={s.status} />
+                <VisibilityBadge visibility={s.visibility} team={s.team} />
                 <span className="text-sm text-slate-500">{fmtDate(s.scheduledAt)}</span>
               </div>
               <h2 className="mt-1.5 font-medium text-slate-900">{s.title}</h2>
@@ -56,6 +58,7 @@ export default function SessionsPage() {
 
 function NewSessionModal({ sessions, onClose }: { sessions: SessionSummary[]; onClose: () => void }) {
   const people = useQuery({ queryKey: ['people'], queryFn: () => api<Person[]>('/people') });
+  const me = useMe().data;
   const qc = useQueryClient();
   const navigate = useNavigate();
   const withOpen = sessions.filter((s) => s.openItems > 0);
@@ -63,6 +66,8 @@ function NewSessionModal({ sessions, onClose }: { sessions: SessionSummary[]; on
     kind: 'MEETING' as SessionKind,
     title: '',
     scheduledAt: new Date().toISOString().slice(0, 10),
+    visibility: 'TEAM' as Visibility,
+    teamId: me?.teams[0]?.id ?? '',
     agenda: '',
     participantIds: [] as string[],
     fromPersonId: '',
@@ -77,6 +82,7 @@ function NewSessionModal({ sessions, onClose }: { sessions: SessionSummary[]; on
         method: 'POST',
         body: {
           ...f,
+          teamId: f.visibility === 'ORG' ? null : f.teamId || null,
           fromPersonId: f.kind === 'TRANSFER' ? f.fromPersonId || null : null,
           toPersonId: f.kind === 'TRANSFER' ? f.toPersonId || null : null,
           carryFromId: f.carryFromId || null,
@@ -119,6 +125,16 @@ function NewSessionModal({ sessions, onClose }: { sessions: SessionSummary[]; on
             <input type="date" className={inputCls} value={f.scheduledAt} onChange={(e) => set('scheduledAt', e.target.value)} required />
           </Field>
         </div>
+        <Field label="Who can see it" hint="Fixed once created. The AI brief, links and conflict checks follow the same rule.">
+          <VisibilityPicker value={f.visibility} onChange={(v) => set('visibility', v)} privateHint="Only the participants (you are added)" />
+        </Field>
+        {f.visibility !== 'ORG' && (me?.teams.length ?? 0) > 1 && (
+          <Field label="Team">
+            <select className={inputCls} value={f.teamId} onChange={(e) => set('teamId', e.target.value)}>
+              {me?.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </Field>
+        )}
         {f.kind === 'TRANSFER' && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Handing over (from)">

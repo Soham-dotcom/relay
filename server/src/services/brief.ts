@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
-import { notFound } from '../errors.js';
+import { AppError, notFound } from '../errors.js';
 import { logger } from '../logger.js';
+import { itemWhere, loadViewer, sessionWhere, type Viewer } from '../access.js';
 import { generateJson, isAiAvailable } from '../ai/client.js';
 import { BRIEF_SYSTEM, briefSchema } from '../ai/prompts.js';
 import { carryCount, OPEN_STATUSES } from './items.js';
@@ -10,20 +11,34 @@ export type Brief = z.infer<typeof briefSchema>;
 
 const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : 'no due date');
 
-/** Everything the brief may mention, as plain facts. The model sees only this. */
-export async function buildBriefContext(sessionId: string, readerId?: string) {
+/**
+ * Everything the brief may mention, as plain facts. The model sees only this, so this is where
+ * access control for the AI happens: every fact must be visible to the person asking AND to the
+ * reader the brief is written for (they may differ: a lead preparing a brief for a newcomer).
+ */
+export async function buildBriefContext(sessionId: string, viewer: Viewer, readerId?: string) {
+  const reader = readerId ? await loadViewer(readerId) : null;
+  if (readerId && !reader) throw notFound('Reader');
+  if (reader && !(await prisma.session.count({ where: { id: sessionId, AND: [sessionWhere(reader)] } }))) {
+    throw new AppError(400, 'READER_NO_ACCESS', `${reader.name} cannot see this session, so a brief for them would leak it`);
+  }
+  const audiences = reader ? [viewer, reader] : [viewer];
+  const visibleSession = { AND: audiences.map(sessionWhere) };
+
   const s = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
       participants: { include: { person: true } },
-      decisions: { include: { conflicts: { where: { status: 'OPEN' }, include: { pastDecision: true } } } },
+      decisions: {
+        include: { conflicts: { where: { status: 'OPEN', pastDecision: { session: visibleSession } }, include: { pastDecision: true } } },
+      },
       items: { include: { owner: true, events: true } },
-      previous: { select: { title: true, summary: true } },
     },
   });
   if (!s) throw notFound('Session');
-  const reader = readerId ? await prisma.person.findUnique({ where: { id: readerId } }) : null;
-  if (readerId && !reader) throw notFound('Reader');
+  const previous = s.previousId
+    ? await prisma.session.findFirst({ where: { id: s.previousId, ...visibleSession }, select: { title: true, summary: true } })
+    : null;
   const [from, to] = await Promise.all([
     s.fromPersonId ? prisma.person.findUnique({ where: { id: s.fromPersonId } }) : null,
     s.toPersonId ? prisma.person.findUnique({ where: { id: s.toPersonId } }) : null,
@@ -35,7 +50,12 @@ export async function buildBriefContext(sessionId: string, readerId?: string) {
   const extraOwners = [from?.id, reader?.id].filter((x): x is string => Boolean(x));
   const handedOver = extraOwners.length
     ? await prisma.actionItem.findMany({
-        where: { ownerId: { in: extraOwners }, status: { in: OPEN_STATUSES }, id: { notIn: s.items.map((i) => i.id) } },
+        where: {
+          ownerId: { in: extraOwners },
+          status: { in: OPEN_STATUSES },
+          id: { notIn: s.items.map((i) => i.id) },
+          AND: audiences.map(itemWhere),
+        },
         include: { owner: true, events: true },
       })
     : [];
@@ -51,7 +71,7 @@ export async function buildBriefContext(sessionId: string, readerId?: string) {
       summary: s.summary ?? '(no recap yet)',
       notes: s.notes.slice(0, 3000),
       handover: s.kind === 'TRANSFER' ? { from: from?.name ?? null, to: to?.name ?? null } : undefined,
-      previousSession: s.previous ? { title: s.previous.title, summary: s.previous.summary } : null,
+      previousSession: previous,
     },
     reader: reader
       ? { name: reader.name, attendance: s.participants.find((p) => p.personId === reader.id)?.attendance ?? 'not a participant' }
@@ -95,8 +115,8 @@ export function fallbackBrief(ctx: Ctx): Brief {
   };
 }
 
-export async function catchUpBrief(sessionId: string, readerId?: string) {
-  const ctx = await buildBriefContext(sessionId, readerId);
+export async function catchUpBrief(sessionId: string, viewer: Viewer, readerId?: string) {
+  const ctx = await buildBriefContext(sessionId, viewer, readerId);
   if (isAiAvailable()) {
     try {
       const brief = await generateJson('brief.generate', briefSchema, BRIEF_SYSTEM, JSON.stringify(ctx));

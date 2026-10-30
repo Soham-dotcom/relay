@@ -66,3 +66,22 @@ Each entry: what was chosen, why, what was rejected, and the trade-off accepted.
 - **Why:** the app makes several DB queries per request; putting app and DB in the same AWS region keeps each one ~1 ms instead of ~200 ms across continents. Prisma migrations need a direct connection, and the free tier's traffic doesn't need PgBouncer pooling.
 - **Rejected:** Singapore (closer to Mumbai users, but every query would cross the Pacific to the database).
 - **Trade-off:** users in India see ~250 ms extra on the page request itself; still far better than paying it on every query.
+
+### D15. Three visibility levels (Private / Team / Org), enforced in one server module
+- **What:** sessions and documents carry `visibility` + owning `teamId`; items follow their session, and owners always see their own items. Every query adds a filter from `server/src/access.ts`; every by-id route uses a guard.
+- **Why:** hand-over content is often sensitive (leave, 1-on-1s, HR). Hiding things only in the UI is bypassable with one API call.
+- **Rejected:** per-record ACL lists (flexible but heavy to build, explain and test in the time); row-level security in Postgres (strong, but Prisma + Neon pooling make it awkward and it hides the rules from the app code).
+- **Trade-off:** three levels can't express "these 3 people from two teams"; Private + participants covers most of that.
+
+### D16. AI respects visibility through "audiences"
+- **What:** the audience of a record is the set of people who can see it. A knowledge link or a conflict is only allowed when the other record's audience covers the source session's audience; the brief's fact sheet only holds what both the requester and the reader can see.
+- **Why:** the AI combines records, and a combination can leak (a private doc title on a team item, a private decision quoted in a team conflict explanation). Filtering the AI's input is the only place this can be stopped.
+- **Consequence:** visibility is fixed at creation. Changing it later would make earlier links/conflicts unsafe; fixing that needs a re-check job, not worth it now.
+
+### D17. Demo "sign in as" picker that issues a real JWT
+- **Why:** evaluators can switch people in two clicks and watch content appear and disappear. Everything behind the picker (signed HS256 token, Bearer header, server checks) is what a real login would use; only the picker would be replaced by SSO.
+- **Rejected:** email + password (evaluators need credentials, switching is slow, and storing passwords adds risk for no demo value).
+- **Details:** Bearer header, not a cookie, so no CSRF surface. The user is re-read from the DB per request, so team changes apply instantly. `JWT_SECRET` is required in production (startup fails without it).
+
+### D18. 404, not 403, for records you can't see
+- **Why:** a 403 confirms the record exists ("there is a private meeting with this id"). A 404 reveals nothing. The denial is still logged as `access.denied` for auditing.
