@@ -1,0 +1,21 @@
+# One Render web service runs the API and serves the built React app (same origin: no CORS).
+# The database is Neon Postgres; set DATABASE_URL and GEMINI_API_KEY in the Render dashboard.
+services:
+  - type: web
+    name: relay
+    runtime: node
+    plan: free
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: LOG_LEVEL
+        value: info
