@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type ActionItem, type Conflict, type Person, type SessionKind, type SessionSummary, type Visibility } from '../api';
+import { api, type ActionItem, type Conflict, type MissedSession, type Person, type SessionKind, type SessionSummary, type Visibility } from '../api';
 import {
   AvatarStack,
   Badge,
@@ -65,6 +65,8 @@ export default function SessionsPage() {
         </div>
       )}
 
+      <MissedPanel />
+
       {sessions.isLoading && <Loading />}
       <ErrorBox error={sessions.error} />
       {sessions.data?.length === 0 && <Empty>No sessions yet. Create the first meeting or work transfer.</Empty>}
@@ -99,6 +101,36 @@ export default function SessionsPage() {
 
       {creating && <NewSessionModal sessions={sessions.data ?? []} onClose={() => setCreating(false)} />}
     </div>
+  );
+}
+
+/** Meetings I missed and hand-overs coming to me: each opens straight into my catch-up brief. */
+function MissedPanel() {
+  const missed = useQuery({ queryKey: ['missed'], queryFn: () => api<MissedSession[]>('/me/missed') });
+  if (!missed.data?.length) return null;
+  return (
+    <section className="animate-rise rounded-lg border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-violet-900">✦ Catch up: {missed.data.length} thing{missed.data.length > 1 ? 's' : ''} you missed</h2>
+      <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+        {missed.data.map((m) => (
+          <li key={m.id}>
+            <Link
+              to={`/sessions/${m.id}#brief`}
+              className="flex items-center justify-between gap-3 rounded-md border border-violet-100 bg-white px-3 py-2 text-sm transition hover:border-violet-400 hover:shadow-sm"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-slate-900">{m.title}</span>
+                <span className="block text-xs text-slate-500">
+                  {m.reason === 'handover' ? 'Being handed to you' : 'You missed it'} · {fmtDate(m.scheduledAt)} · {m.decisions} decisions
+                  {m.yourItems > 0 && <b className="text-teal-700"> · {m.yourItems} yours</b>}
+                </span>
+              </span>
+              <span className="shrink-0 rounded-md bg-violet-600 px-2 py-1 text-xs font-medium text-white">Brief me</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

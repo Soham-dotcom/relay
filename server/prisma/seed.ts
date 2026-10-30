@@ -511,18 +511,27 @@ async function main() {
   await link(docs.postmortem, 'Background: the 2 Oct outage was caused by a secret rotation, which is what this work finishes.', 0.85, { itemId: iSecret.id });
 
   // Past held sessions become knowledge docs too; access follows the session.
-  for (const s of [retro, allHands, s1, s2, s3, triage, oneOnOne]) {
-    const full = await prisma.session.findUniqueOrThrow({ where: { id: s.id }, include: { decisions: true } });
+  // Embedded like any other doc, so search ranks meetings and documents on the same scale.
+  const held = await Promise.all(
+    [retro, allHands, s1, s2, s3, triage, oneOnOne].map((s) => prisma.session.findUniqueOrThrow({ where: { id: s.id }, include: { decisions: true } })),
+  );
+  const meetingDocs = held.map((full) => ({
+    full,
+    title: `${full.title} (${full.scheduledAt.toISOString().slice(0, 10)})`,
+    content: `Summary: ${full.summary}\n\nDecisions:\n${full.decisions.map((x) => `- ${x.text}`).join('\n')}`,
+  }));
+  const meetingVectors = await embedTexts('seed.embed_meetings', meetingDocs.map((m) => `${m.title}\n${m.content}`));
+  for (const [i, m] of meetingDocs.entries()) {
     await prisma.knowledgeDoc.create({
       data: {
-        title: `${full.title} (${full.scheduledAt.toISOString().slice(0, 10)})`,
-        content: `Summary: ${full.summary}\n\nDecisions:\n${full.decisions.map((x) => `- ${x.text}`).join('\n')}`,
+        title: m.title,
+        content: m.content,
         source: 'MEETING',
-        sessionId: s.id,
-        visibility: full.visibility,
-        teamId: full.teamId,
-        createdById: full.createdById,
-        embedding: [],
+        sessionId: m.full.id,
+        visibility: m.full.visibility,
+        teamId: m.full.teamId,
+        createdById: m.full.createdById,
+        embedding: meetingVectors?.[i] ?? [],
       },
     });
   }

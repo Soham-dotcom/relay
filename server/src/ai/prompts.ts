@@ -102,6 +102,23 @@ reason: one sentence saying what in the document is useful for the target.
 Only use targetId and docId values that appear in the input.
 Reply with ONLY this JSON: {"links": [{"targetId": string, "docId": string, "reason": string, "relevance": number between 0 and 1}]}`;
 
+// ---------- Ask Relay: answers from the knowledge base, with citations ----------
+
+export const askSchema = z.object({
+  found: z.boolean(),
+  answer: z.string(),
+  citations: z.array(z.string()).max(6),
+});
+
+export const ASK_SYSTEM = `You answer a team member's question using ONLY the documents provided (team documents and past meeting records).
+Rules:
+- If the documents do not contain the answer, set found=false, answer="", citations=[]. Never guess or use outside knowledge.
+- Otherwise answer in 1-4 plain sentences with concrete facts (names, dates, numbers).
+- Documents are sorted oldest first and each has a date. If they disagree (for example a decision was later changed),
+  the document with the LATEST date wins: give that answer and say what it replaced and when.
+- citations: the docId of every document you used. Only use docId values from the input.
+Reply with ONLY this JSON: {"found": boolean, "answer": string, "citations": string[]}`;
+
 // ---------- Special feature: decision conflict check ----------
 
 export const conflictSchema = z.object({

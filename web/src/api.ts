@@ -142,6 +142,42 @@ export interface KnowledgeDoc {
   links: { id: string; reason: string; item: { id: string; title: string; status: ItemStatus } | null; decision: { id: string; text: string; sessionId: string } | null }[];
 }
 
+export interface MissedSession {
+  id: string;
+  title: string;
+  kind: SessionKind;
+  scheduledAt: string;
+  visibility: Visibility;
+  reason: 'missed' | 'handover';
+  decisions: number;
+  openItems: number;
+  yourItems: number;
+}
+
+export interface AskSource {
+  id: string;
+  title: string;
+  source: 'DOCUMENT' | 'MEETING';
+  sessionId: string | null;
+}
+
+export interface AskResult {
+  mode: 'ai' | 'search' | 'none';
+  answer: string | null;
+  citations: AskSource[];
+  sources: AskSource[];
+}
+
+export interface ActivityRequest {
+  requestId: string;
+  time: string;
+  method: string | null;
+  url: string | null;
+  status: number | null;
+  durationMs: number | null;
+  events: { time: string; level: number; msg: string; event?: string; op?: string; latencyMs?: number; outcome?: string; attempt?: number; code?: string; resource?: string }[];
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;

@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { ApiError, type ItemStatus, type SessionStatus, type Visibility } from './api';
 
 export const fmtDate = (iso: string | null | undefined) =>
@@ -159,7 +160,11 @@ export function ErrorBox({ error }: { error: unknown }) {
           ))}
         </ul>
       ) : null}
-      {e?.requestId && <p className="mt-1 text-xs text-red-600">Request ID: {e.requestId}</p>}
+      {e?.requestId && (
+        <p className="mt-1 text-xs text-red-600">
+          Request ID: <Link className="font-mono underline" to={`/activity?rid=${e.requestId}`}>{e.requestId}</Link> (see what happened)
+        </p>
+      )}
     </div>
   );
 }

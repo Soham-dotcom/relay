@@ -196,6 +196,52 @@ describe('access control', () => {
   });
 });
 
+describe('what I missed, Ask Relay', () => {
+  it('lists sessions I missed and hand-overs coming to me, not ones I attended', async () => {
+    const s = (await newMeeting({ title: 'Missed sync', scheduledAt: new Date().toISOString().slice(0, 10) })).body;
+    await prisma.participant.update({ where: { sessionId_personId: { sessionId: s.id, personId: bob.id } }, data: { attendance: 'MISSED' } });
+    await newMeeting({ kind: 'TRANSFER', title: 'Alice to Bob', fromPersonId: alice.id, toPersonId: bob.id, scheduledAt: new Date().toISOString().slice(0, 10) });
+
+    const bobs = (await as(bob).get('/api/me/missed')).body.map((m: { title: string; reason: string }) => `${m.reason}:${m.title}`).sort();
+    expect(bobs).toEqual(['handover:Alice to Bob', 'missed:Missed sync']);
+    expect((await as(alice).get('/api/me/missed')).body).toHaveLength(0);
+  });
+
+  it('Ask Relay searches only documents the asker can see, and drops invented citations', async () => {
+    await as(alice).post('/api/knowledge', { title: 'Launch date memo', content: 'The launch date is 15 November.', visibility: 'TEAM', teamId: teamA });
+    await as(carol).post('/api/knowledge', { title: 'Team B launch secret', content: 'Team B launch date is secret.', visibility: 'TEAM', teamId: teamB });
+
+    // AI off: plain search results, still scoped.
+    const search = (await as(alice).post('/api/ask', { question: 'What is the launch date?' })).body;
+    expect(search.mode).toBe('search');
+    expect(search.sources.map((s: { title: string }) => s.title)).toEqual(['Launch date memo']);
+
+    let prompt = '';
+    setAiProvider({
+      model: 'fake',
+      embed: async (texts) => texts.map(() => []),
+      async generateText(_s, p) {
+        prompt = p;
+        const docId = JSON.parse(p).documents[0].docId;
+        return JSON.stringify({ found: true, answer: 'The launch is on 15 November.', citations: [docId, 'invented-doc'] });
+      },
+    });
+    const res = (await as(alice).post('/api/ask', { question: 'What is the launch date?' })).body;
+    expect(res.mode).toBe('ai');
+    expect(res.answer).toContain('15 November');
+    expect(res.citations.map((c: { title: string }) => c.title)).toEqual(['Launch date memo']);
+    expect(prompt).not.toContain('Team B');
+  });
+
+  it('Ask Relay reports "not found" instead of an uncited answer', async () => {
+    await as(alice).post('/api/knowledge', { title: 'Release process', content: 'Releases go out on Tuesdays.', visibility: 'ORG' });
+    setAiProvider(scripted([JSON.stringify({ found: true, answer: 'Made-up answer', citations: ['not-a-real-doc'] })]));
+    const res = (await as(alice).post('/api/ask', { question: 'When do releases go out?' })).body;
+    expect(res.answer).toBeNull();
+    expect(res.citations).toEqual([]);
+  });
+});
+
 describe('AI features', () => {
   it('drafts a recap and maps owner names to participants without saving anything', async () => {
     setAiProvider(

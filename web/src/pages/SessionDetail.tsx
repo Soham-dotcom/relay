@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Attendance, type Brief, type Person, type RecapDraft, type SessionDetail, type SessionStatus, type SessionSummary } from '../api';
 import { Avatar, Badge, Button, Card, Empty, ErrorBox, fmtDate, inputCls, Loading, StatusBadge, VisibilityBadge } from '../ui';
 import { ItemRow, NewItemForm } from '../components/ItemRow';
+import { useMe } from '../App';
 
 export default function SessionPage() {
   const { id = '' } = useParams();
@@ -301,12 +302,25 @@ function ParticipantsCard({ s }: { s: SessionDetail }) {
 }
 
 function BriefCard({ s }: { s: SessionDetail }) {
-  const defaultReader = s.kind === 'TRANSFER' ? s.toPerson?.id : s.participants.find((p) => p.attendance === 'MISSED')?.personId;
+  const me = useMe().data;
+  const { hash } = useLocation();
+  const fromInbox = hash === '#brief';
+  const meTakesPart = s.participants.some((p) => p.personId === me?.id);
+  // Coming from "What I missed": the brief is for me. Otherwise suggest whoever needs it most.
+  const defaultReader =
+    fromInbox && meTakesPart ? me?.id : s.kind === 'TRANSFER' ? s.toPerson?.id : s.participants.find((p) => p.attendance === 'MISSED')?.personId;
   const [reader, setReader] = useState(defaultReader ?? '');
   const brief = useMutation({ mutationFn: () => api<Brief>(`/sessions/${s.id}/brief`, { method: 'POST', body: reader ? { readerId: reader } : {} }) });
+  const started = useRef(false);
+  useEffect(() => {
+    if (!fromInbox || started.current) return;
+    started.current = true;
+    document.getElementById('brief')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    brief.mutate();
+  }, [fromInbox, brief]);
   const b = brief.data?.brief;
   return (
-    <Card title="Catch-up brief">
+    <Card title={<span id="brief">Catch-up brief</span>} className={fromInbox ? 'ring-2 ring-violet-300' : ''}>
       <p className="mb-2 text-xs text-slate-600">{s.kind === 'TRANSFER' ? 'For the person taking over.' : 'For anyone who missed it.'} Personalised to the reader's own items.</p>
       <div className="flex gap-2">
         <select aria-label="Brief for" className={inputCls} value={reader} onChange={(e) => setReader(e.target.value)}>

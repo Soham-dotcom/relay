@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { extractJson, generateJson, setAiProvider, AiUnavailableError } from '../src/ai/client.js';
 import { cosine, keywordScore, rankCandidates } from '../src/lib/similarity.js';
 import { matchOwner } from '../src/services/recap.js';
+import { filterOwnActivity } from '../src/services/activity.js';
 import { scripted } from './fakes.js';
 
 afterEach(() => setAiProvider(null));
@@ -30,6 +31,26 @@ describe('generateJson', () => {
   it('reports AI_UNAVAILABLE when no key is configured', async () => {
     setAiProvider(null);
     await expect(generateJson('t', schema, 's', 'p')).rejects.toMatchObject({ status: 503, code: 'AI_UNAVAILABLE' });
+  });
+});
+
+describe('activity log filter', () => {
+  const lines = [
+    { requestId: 'r1', userId: 'me', time: '2026-10-30T10:00:00Z', event: 'ai.call', op: 'brief.generate', latencyMs: 900, outcome: 'ok' },
+    { requestId: 'r1', time: '2026-10-30T10:00:01Z', req: { method: 'POST', url: '/api/sessions/s/brief' }, res: { statusCode: 200 }, responseTime: 950 },
+    { requestId: 'r2', userId: 'someone-else', time: '2026-10-30T10:01:00Z', event: 'item.closed' },
+    { requestId: 'r2', time: '2026-10-30T10:01:01Z', req: { method: 'PATCH', url: '/api/items/x' }, res: { statusCode: 200 } },
+  ];
+
+  it("returns only my requests, grouped, with the access line's method, url and status", () => {
+    const out = filterOwnActivity(lines, 'me');
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ requestId: 'r1', method: 'POST', status: 200, durationMs: 950 });
+    expect(out[0].events[0]).toMatchObject({ event: 'ai.call', latencyMs: 900 });
+  });
+
+  it("never returns someone else's request, even when asked for its id", () => {
+    expect(filterOwnActivity(lines, 'me', 'r2')).toEqual([]);
   });
 });
 

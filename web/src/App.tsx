@@ -8,6 +8,8 @@ import ItemsPage from './pages/Items';
 import KnowledgePage from './pages/Knowledge';
 import ConflictsPage from './pages/Conflicts';
 import SignIn from './pages/SignIn';
+import AskPage from './pages/Ask';
+import ActivityPage from './pages/Activity';
 import { Avatar, Loading } from './ui';
 
 export default function App() {
@@ -42,6 +44,8 @@ function Shell() {
     { to: '/items', label: 'Action items' },
     { to: '/knowledge', label: 'Knowledge base' },
     { to: '/conflicts', label: 'Conflicts', count: conflicts.data?.length },
+    { to: '/ask', label: '✦ Ask' },
+    { to: '/activity', label: 'Activity' },
   ];
 
   return (
@@ -90,6 +94,8 @@ function Shell() {
           <Route path="/items" element={<ItemsPage />} />
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/conflicts" element={<ConflictsPage />} />
+          <Route path="/ask" element={<AskPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="*" element={<p className="text-sm text-slate-600">Page not found.</p>} />
         </Routes>
       </main>

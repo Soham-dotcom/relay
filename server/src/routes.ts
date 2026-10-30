@@ -6,6 +6,8 @@ import { assertConflictVisible, assertDocVisible, assertItemVisible, assertSessi
 import { issueToken, requireAuth, viewerOf } from './auth.js';
 import { AppError } from './errors.js';
 import { catchUpBrief } from './services/brief.js';
+import { myActivity, whatIMissed } from './services/activity.js';
+import { ask } from './services/ask.js';
 import { listConflicts, resolveConflict } from './services/conflicts.js';
 import { carryForward, createItem, getItem, listItems, updateItem } from './services/items.js';
 import { createDoc, deleteDoc, linkToKnowledge, listDocs } from './services/knowledge.js';
@@ -65,6 +67,22 @@ api.get('/auth/me', async (req, res) => {
     include: { memberships: { include: { team: { select: { id: true, name: true } } } } },
   });
   res.json({ id: person.id, name: person.name, role: person.role, teams: person.memberships.map((m) => m.team) });
+});
+
+api.get('/me/missed', async (req, res) => {
+  res.json(await whatIMissed(viewerOf(req)));
+});
+
+/** Your own requests only: lets anyone trace an error's request ID without seeing other people's activity. */
+api.get('/me/activity', async (req, res) => {
+  const { requestId } = z.object({ requestId: z.string().regex(/^[\w-]{1,64}$/).optional() }).parse(req.query);
+  res.json(await myActivity(viewerOf(req), requestId));
+});
+
+// ---------- Ask Relay ----------
+api.post('/ask', async (req, res) => {
+  const { question } = z.object({ question: text(500).min(3, 'Ask a question of at least a few words') }).parse(req.body);
+  res.json(await ask(question, viewerOf(req)));
 });
 
 // ---------- People ----------

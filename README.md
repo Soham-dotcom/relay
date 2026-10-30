@@ -24,6 +24,9 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 | Never lose an open item | **Lifecycle tracking**: Open → In progress → Blocked → Done / Dropped, with owner and due date. **Carry forward** moves open items to the next session and keeps their full history. An item cannot be closed without an **outcome** |
 | Find the background | **Knowledge base**: team documents + every held meeting. AI links items and decisions to the documents that help, and says why |
 | ★ Avoid acting on a reversed decision | **Decision conflict check** (special feature, below) |
+| Catch up on what you missed | **What I missed** panel on the home page: meetings you missed and hand-overs coming to you, each opening straight into your catch-up brief |
+| Ask the team memory | **✦ Ask Relay**: questions answered from documents and past meetings you may see, always with citations; says "not found" instead of guessing |
+| Trace any request | **Activity** page: your own requests from the structured log (events, AI calls with latency); every error links its request ID here |
 | Share the right context with the right people | **Access control**: every session and document is 🔒 Private, 👥 Team or 🌐 Organisation. The server enforces it on every query, and the AI respects it too (below) |
 
 ## Using Relay: a 5-minute tour
@@ -192,6 +195,9 @@ All endpoints are under `/api`. Errors always look like `{ "error": { "code", "m
 | `GET /health` | DB check + whether AI is configured (public) |
 | `GET /auth/people`, `POST /auth/login` | Demo sign-in: list people / get a signed token for one (public) |
 | `GET /auth/me` | The signed-in user and their teams |
+| `GET /me/missed` | Sessions I missed and hand-overs to me (last 30 days) |
+| `GET /me/activity?requestId=` | My own requests from the log file, grouped by request ID |
+| `POST /ask` | Ask Relay: cited answer from visible documents and meetings |
 | `GET/POST /people` | List / add people |
 | `GET/POST /sessions` | List (filter `kind`, `status`) / create (`visibility`, `teamId`, optionally `carryFromId`, initial `actionItems`) |
 | `GET/PATCH/DELETE /sessions/:id` | Detail / update (title, date, status, agenda, notes) / delete |
@@ -268,8 +274,17 @@ Layout: `server/src/routes.ts` (HTTP + validation) → `server/src/services/*` (
 - **Retrieval is in-memory.** Embeddings are stored in Postgres but compared in Node, which is fine for hundreds of documents. At scale, move to `pgvector` with an index.
 - **AI quality is not measured with a labelled set.** Outputs are schema-checked and reviewed by the user, but there is no accuracy number yet.
 - **No reminders are sent.** Follow-up happens through overdue/carried flags, the Action items board and briefs, not email or chat notifications.
+- **Gemini free tier allows 20 requests per day per model.** Past that, AI features fall back (data-only brief, keyword links, search-only Ask). A paid key or a second model removes the limit.
 - **Free hosting:** the Render free tier sleeps after ~15 min idle (first request ~30 s), and its disk is wiped on redeploy, so `logs/app.log` there is per-instance. In production you would ship logs to a log service.
 - The AI recap and follow-ups run inside the request (a few seconds). A job queue would make this asynchronous.
+
+## Docker
+
+```bash
+docker compose up --build   # app + Postgres on http://localhost:4000
+```
+
+The multi-stage `Dockerfile` builds the UI and API into one slim image (migrations run on start, health check on `/api/health`). CI builds the image on every push.
 
 ## Deploy (Render + Neon)
 

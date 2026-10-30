@@ -1,0 +1,30 @@
+# Run the whole app locally with Docker: `docker compose up --build`, then open http://localhost:4000
+# Load demo data once, from your machine (the slim image has no seed tooling):
+#   DATABASE_URL=postgresql://relay:relay@localhost:5432/relay npm run db:seed --prefix server
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay
+      POSTGRES_DB: relay
+    ports: ['5432:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U relay']
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://relay:relay@db:5432/relay
+      JWT_SECRET: local-docker-secret-change-me
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports: ['4000:4000']
+
+volumes:
+  pgdata:
