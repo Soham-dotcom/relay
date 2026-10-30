@@ -22,6 +22,7 @@ export const recapSchema = z.object({
         owner: z.string().nullable(),
         dueDate: isoDate,
         evidence: z.string().nullable(),
+        existingItemId: z.string().nullable().default(null),
       }),
     )
     .max(40),
@@ -33,16 +34,25 @@ Rules:
 - A decision is something the group agreed or chose. Open questions are not decisions.
 - An action item is a concrete task someone must do. Its title starts with a verb.
 - owner: the person's name exactly as written in the participant list if the text names them, else null.
-- dueDate: YYYY-MM-DD if the text gives a date or a relative date you can resolve from "today", else null.
+- dueDate: YYYY-MM-DD if the text gives a date, or a relative date ("tomorrow", "by Thursday") resolved from the MEETING DATE, else null.
 - evidence: a short quote from the input that supports the item, or null.
+- existingItemId: if the task is one of the "Already open items" listed (same work, even if worded differently), its id; else null. Never create a second copy of an open item.
 - summary: 2-4 plain sentences.
-Reply with ONLY this JSON: {"summary": string, "decisions": string[], "actionItems": [{"title": string, "owner": string|null, "dueDate": string|null, "evidence": string|null}]}`;
+Reply with ONLY this JSON: {"summary": string, "decisions": string[], "actionItems": [{"title": string, "owner": string|null, "dueDate": string|null, "evidence": string|null, "existingItemId": string|null}]}`;
 
-export function recapPrompt(p: { title: string; today: string; participants: string[]; agenda: string; raw: string }) {
+export function recapPrompt(p: {
+  title: string;
+  meetingDate: string;
+  participants: string[];
+  agenda: string;
+  openItems: { id: string; title: string; owner: string }[];
+  raw: string;
+}) {
   return `Meeting: ${p.title}
-Today: ${p.today}
+Meeting date: ${p.meetingDate}
 Participants: ${p.participants.join(', ') || '(none listed)'}
 Agenda: ${p.agenda || '(none)'}
+Already open items: ${p.openItems.length ? JSON.stringify(p.openItems) : '(none)'}
 
 Input to recap:
 """
@@ -68,6 +78,7 @@ Rules:
 - yourActions: open items owned by the reader (empty if there is no reader or none are owned).
 - openItems: other open items the reader should know about, with owner and due date.
 - watchOut: overdue items, items carried forward several times, open decision conflicts, unassigned items.
+- Call an item overdue ONLY if its "overdue" field is true. "today" in the context is the real current date.
 - headline: one sentence. summary: at most 4 sentences.
 Reply with ONLY this JSON: {"headline": string, "summary": string, "keyDecisions": string[], "yourActions": string[], "openItems": string[], "watchOut": string[]}`;
 

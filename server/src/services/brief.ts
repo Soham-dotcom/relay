@@ -41,6 +41,7 @@ export async function buildBriefContext(sessionId: string, readerId?: string) {
     : [];
 
   return {
+    today: day(now),
     session: {
       kind: s.kind === 'TRANSFER' ? 'work transfer' : 'meeting',
       title: s.title,

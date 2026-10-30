@@ -71,11 +71,11 @@ Open http://localhost:5173. To run it the way production does (one port): `npm r
 
 ```bash
 cd server
-npm test          # 17 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
+npm test          # 18 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
 npm run typecheck
 ```
 
-The AI is replaced by a scripted fake in tests, so they are fast, free and deterministic. They cover validation errors, the outcome-required rule, carry-forward history, recap drafting and owner matching, AI retry and failure, the fallback brief, and the conflict check rejecting invented ids and low-confidence answers.
+The AI is replaced by a scripted fake in tests, so they are fast, free and deterministic. They cover validation errors, the outcome-required rule, carry-forward history, recap drafting and owner matching, recognising already-open items instead of duplicating them, AI retry and failure, the fallback brief, and the conflict check rejecting invented ids and low-confidence answers.
 
 ## AI configuration
 
@@ -90,8 +90,8 @@ The AI is replaced by a scripted fake in tests, so they are fast, free and deter
 
 | Feature | Input | Output (validated with zod) |
 |---|---|---|
-| Recap | raw text + participants + agenda + today's date | summary, decisions, action items (title, owner, ISO due date, supporting quote) |
-| Catch-up brief | a JSON fact sheet of the session, built by the server | headline, summary, your actions, open items, watch-outs |
+| Recap | raw text + participants + agenda + meeting date + the session's already-open items | summary, decisions, action items (title, owner, ISO due date, supporting quote, id of the open item it refers to) |
+| Catch-up brief | a JSON fact sheet of the session (with today's date and an `overdue` flag per item), built by the server | headline, summary, your actions, open items, watch-outs |
 | Knowledge linking | each item/decision + its top 4 candidate docs | links with a one-sentence reason and a relevance score |
 | Conflict check | each new decision + its 5 most related earlier decisions | conflicting pairs with explanation and confidence |
 
@@ -99,7 +99,10 @@ The AI is replaced by a scripted fake in tests, so they are fast, free and deter
 - Every prompt says: use only the given input, never invent people or dates, reply in one exact JSON shape.
 - Every reply is parsed and validated against a zod schema. If invalid, Relay retries **once** with the validation error in the prompt, then fails with `503 AI_UNAVAILABLE`.
 - The model never writes to the database directly. The recap is a **draft** the user edits and confirms. Owner names are matched to real participants (full name, then a unique first name); an unmatched name is shown as a warning, never guessed.
+- **No duplicate items.** Notes usually repeat last week's open work ("Vikram will run the load test by Thursday"). The recap sees the session's open items and returns the id of the one a note refers to; saving then updates that item's owner/due date (recorded in its history) instead of creating a copy. The user can override this in the draft.
 - The model can only reference ids it was given. Anything else is dropped and logged.
+- Relative dates ("by tomorrow") resolve from the **meeting date**; "overdue" is computed by the server from the real date and passed to the model as a flag, never left to the model to judge.
+- **Verified live** against Gemini on 2026-10-30: a messy 7-line note produced the right decision, owners, due dates and quotes; it matched 2 of 3 tasks to existing open items; the conflict check flagged "switch to Cashfree" against the earlier "use Razorpay" (confidence 1.0). One Gemini `503 high demand` reply during testing was recovered by the automatic retry.
 - **Graceful degradation** when AI is off or failing: manual recap entry still works; the catch-up brief is built straight from the data (marked "AI unavailable"); knowledge linking falls back to keyword matching; the conflict check is skipped and the user is told.
 - The provider sits behind a two-method interface (`generateText`, `embed`), so switching to Claude or OpenAI is one new class.
 

@@ -92,7 +92,15 @@ export interface SessionDetail extends Omit<SessionSummary, '_count' | 'openItem
 export interface RecapDraft {
   summary: string;
   decisions: string[];
-  actionItems: { title: string; ownerId: string | null; suggestedOwner: string | null; dueDate: string | null; evidence: string | null }[];
+  actionItems: {
+    title: string;
+    ownerId: string | null;
+    suggestedOwner: string | null;
+    dueDate: string | null;
+    evidence: string | null;
+    /** Set when the AI recognised an item that is already open: saving updates it instead of copying it. */
+    existingItemId: string | null;
+  }[];
 }
 
 export interface Brief {

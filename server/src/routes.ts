@@ -110,7 +110,7 @@ api.post('/sessions/:id/recap/apply', async (req, res) => {
       summary: text(5000).min(1),
       notes: text(30000).optional(),
       decisions: z.array(text(1000).min(1)).max(30),
-      actionItems: z.array(newItem).max(40),
+      actionItems: z.array(newItem.extend({ existingItemId: id.nullish() })).max(40),
     })
     .parse(req.body);
   res.json(await applyRecap(id.parse(req.params.id), body));

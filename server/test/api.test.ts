@@ -95,6 +95,37 @@ describe('AI features', () => {
     expect(await prisma.actionItem.count()).toBe(0);
   });
 
+  it('matches already-open items instead of duplicating them, and ignores invented ids', async () => {
+    const s = (await newMeeting({ scheduledAt: '2026-11-04', actionItems: [{ title: 'Run k6 load test at 200 mandates/minute', ownerId: bob.id }] })).body;
+    const existingId = s.items[0].id;
+    setAiProvider({
+      model: 'fake',
+      embed: async (texts) => texts.map(() => []),
+      async generateText(_sys, prompt) {
+        expect(prompt).toContain('Meeting date: 2026-11-04');
+        expect(prompt).toContain(existingId);
+        return JSON.stringify({
+          summary: 'Load test unblocked.',
+          decisions: [],
+          actionItems: [
+            { title: 'Run k6 load test', owner: 'Alice', dueDate: '2026-11-06', evidence: 'run k6 by thursday', existingItemId: existingId },
+            { title: 'Get sandbox keys', owner: null, dueDate: null, evidence: null, existingItemId: 'invented-id' },
+          ],
+        });
+      },
+    });
+    const draft = (await request(app).post(`/api/sessions/${s.id}/recap/draft`).send({ raw: 'Vikram will run k6 by thursday. Need sandbox keys.' })).body;
+    expect(draft.actionItems[0]).toMatchObject({ existingItemId: existingId, title: 'Run k6 load test at 200 mandates/minute', ownerId: alice.id });
+    expect(draft.actionItems[1].existingItemId).toBeNull();
+
+    const res = await request(app).post(`/api/sessions/${s.id}/recap/apply`).send({ summary: draft.summary, decisions: [], actionItems: draft.actionItems });
+    expect(res.body).toMatchObject({ items: 1, updated: 1 });
+    expect(await prisma.actionItem.count()).toBe(2);
+    const updated = await prisma.actionItem.findUniqueOrThrow({ where: { id: existingId }, include: { events: true } });
+    expect(updated.ownerId).toBe(alice.id);
+    expect(updated.events.map((e) => e.type)).toEqual(expect.arrayContaining(['REASSIGNED', 'DUE_CHANGED']));
+  });
+
   it('returns 503 AI_UNAVAILABLE for a recap when AI is down, so the user can enter it by hand', async () => {
     const s = (await newMeeting()).body;
     const res = await request(app).post(`/api/sessions/${s.id}/recap/draft`).send({ raw: 'Some meeting notes that are long enough.' });

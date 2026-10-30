@@ -113,9 +113,16 @@ function RecapCard({ s }: { s: SessionDetail }) {
   const gen = useMutation({ mutationFn: () => api<RecapDraft>(`/sessions/${s.id}/recap/draft`, { method: 'POST', body: { raw } }), onSuccess: setDraft });
   const save = useMutation({
     mutationFn: (d: RecapDraft) =>
-      api<{ decisions: number; items: number; links: number; conflicts: number; warnings: string[] }>(`/sessions/${s.id}/recap/apply`, {
+      api<{ decisions: number; items: number; updated: number; links: number; conflicts: number; warnings: string[] }>(`/sessions/${s.id}/recap/apply`, {
         method: 'POST',
-        body: { summary: d.summary, notes: raw, decisions: d.decisions.filter((x) => x.trim()), actionItems: d.actionItems.filter((a) => a.title.trim()).map((a) => ({ title: a.title, ownerId: a.ownerId, dueDate: a.dueDate })) },
+        body: {
+          summary: d.summary,
+          notes: raw,
+          decisions: d.decisions.filter((x) => x.trim()),
+          actionItems: d.actionItems
+            .filter((a) => a.title.trim())
+            .map((a) => ({ title: a.title, ownerId: a.ownerId, dueDate: a.dueDate, existingItemId: a.existingItemId })),
+        },
       }),
     onSuccess: () => {
       setDraft(null);
@@ -133,7 +140,8 @@ function RecapCard({ s }: { s: SessionDetail }) {
       {s.summary && <p className="text-sm leading-relaxed text-slate-700">{s.summary}</p>}
       {save.data && (
         <div className="mt-3 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">
-          Saved {save.data.decisions} decisions and {save.data.items} items · {save.data.links} knowledge links · {save.data.conflicts} conflict(s) found.
+          Saved {save.data.decisions} decisions and {save.data.items} new items
+          {save.data.updated > 0 && <>, updated {save.data.updated} existing</>} · {save.data.links} knowledge links · {save.data.conflicts} conflict(s) found.
           {save.data.warnings.map((w) => <p key={w} className="text-amber-800">⚠ {w}</p>)}
         </div>
       )}
@@ -175,8 +183,14 @@ function RecapCard({ s }: { s: SessionDetail }) {
             <p className="text-sm font-medium">Action items</p>
             {draft.actionItems.map((a, i) => (
               <div key={i} className="mt-2 rounded border border-slate-200 bg-white p-2">
+                {a.existingItemId && (
+                  <p className="mb-1.5 flex flex-wrap items-center gap-2 text-xs text-sky-800">
+                    <span className="rounded-full bg-sky-50 px-2 py-0.5 font-medium ring-1 ring-sky-200">Already open: will update owner/due date, not duplicate</span>
+                    <button type="button" className="underline" onClick={() => upd((d) => void (d.actionItems[i].existingItemId = null))}>Make it a new item instead</button>
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  <input aria-label={`Item ${i + 1} title`} className={`${inputCls} min-w-[180px] flex-1`} value={a.title} onChange={(e) => upd((d) => void (d.actionItems[i].title = e.target.value))} />
+                  <input aria-label={`Item ${i + 1} title`} disabled={Boolean(a.existingItemId)} className={`${inputCls} min-w-[180px] flex-1 disabled:bg-slate-50`} value={a.title} onChange={(e) => upd((d) => void (d.actionItems[i].title = e.target.value))} />
                   <select aria-label={`Item ${i + 1} owner`} className={`${inputCls} !w-36`} value={a.ownerId ?? ''} onChange={(e) => upd((d) => void (d.actionItems[i].ownerId = e.target.value || null))}>
                     <option value="">Unassigned</option>
                     {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -188,7 +202,7 @@ function RecapCard({ s }: { s: SessionDetail }) {
                 {a.evidence && <p className="mt-1 text-xs italic text-slate-500">“{a.evidence}”</p>}
               </div>
             ))}
-            <Button variant="ghost" className="mt-1" onClick={() => upd((d) => void d.actionItems.push({ title: '', ownerId: null, suggestedOwner: null, dueDate: null, evidence: null }))}>+ Item</Button>
+            <Button variant="ghost" className="mt-1" onClick={() => upd((d) => void d.actionItems.push({ title: '', ownerId: null, suggestedOwner: null, dueDate: null, evidence: null, existingItemId: null }))}>+ Item</Button>
           </div>
           <ErrorBox error={save.error} />
           <div className="flex gap-2">
