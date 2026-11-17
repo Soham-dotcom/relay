@@ -139,6 +139,12 @@ export interface KnowledgeDoc {
   team: TeamRef | null;
   sessionId: string | null;
   createdAt: string;
+  /** Set when the document came from an uploaded file. */
+  fileName: string | null;
+  fileType: 'pdf' | 'docx' | 'text' | null;
+  /** Characters of text and searchable passages (chunks). */
+  chars: number;
+  chunks: number;
   links: { id: string; reason: string; item: { id: string; title: string; status: ItemStatus } | null; decision: { id: string; text: string; sessionId: string } | null }[];
 }
 
@@ -159,6 +165,7 @@ export interface AskSource {
   title: string;
   source: 'DOCUMENT' | 'MEETING';
   sessionId: string | null;
+  fileName?: string | null;
 }
 
 export interface AskResult {
@@ -218,14 +225,16 @@ export const auth = {
 export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   let res: Response;
   const headers: Record<string, string> = {};
-  if (init?.body !== undefined) headers['content-type'] = 'application/json';
+  // FormData (file uploads) sets its own multipart content type; everything else is JSON.
+  const isForm = init?.body instanceof FormData;
+  if (init?.body !== undefined && !isForm) headers['content-type'] = 'application/json';
   const token = auth.get();
   if (token) headers.authorization = `Bearer ${token}`;
   try {
     res = await fetch(`/api${path}`, {
       method: init?.method ?? 'GET',
       headers,
-      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+      body: init?.body === undefined ? undefined : isForm ? (init.body as FormData) : JSON.stringify(init.body),
     });
   } catch {
     throw new ApiError(0, 'NETWORK', 'Cannot reach the server. It may be waking up; try again in a few seconds.');

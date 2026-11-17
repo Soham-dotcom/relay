@@ -197,6 +197,10 @@ model KnowledgeDoc {
   updatedAt   DateTime        @updatedAt
   session     Session?        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   links       KnowledgeLink[]
+  /// Set when the document came from an uploaded file (only the extracted text is stored, never the file).
+  fileName    String?
+  fileType    String?
+  chunks      DocChunk[]
 }
 
 /// AI-suggested link from an action item or decision to a knowledge doc, with the reason.
@@ -230,4 +234,17 @@ model DecisionConflict {
   pastDecision   Decision       @relation("PastDecision", fields: [pastDecisionId], references: [id], onDelete: Cascade)
 
   @@unique([decisionId, pastDecisionId])
+}
+
+/// A passage of a knowledge document, embedded on its own so search can find the right part of a
+/// long file instead of only its beginning.
+model DocChunk {
+  id        String       @id @default(cuid())
+  docId     String
+  index     Int
+  text      String
+  embedding Float[]
+  doc       KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, index])
 }

@@ -35,6 +35,7 @@ Teams lose context every time work changes hands: someone misses a meeting, a co
 | Find the background | **Knowledge base**: team documents + every held meeting. AI links items and decisions to the documents that help, and says why |
 | ★ Avoid acting on a reversed decision | **Decision conflict check** (special feature, below) |
 | Catch up on what you missed | **What I missed** panel on the home page: meetings you missed and hand-overs coming to you, each opening straight into your catch-up brief |
+| Upload what the team already has | **File upload**: PDF, Word (.docx), .txt, .md or .csv (up to 10 MB). The text is extracted, split into passages and embedded, so Ask can answer from any page of the file. Only the text is kept, never the file |
 | Ask the team memory | **✦ Ask Relay**: questions answered from documents and past meetings you may see, always with citations; says "not found" instead of guessing |
 | Trace any request | **Activity** page: your own requests from the structured log (events, AI calls with latency); every error links its request ID here |
 | Share the right context with the right people | **Access control**: every session and document is 🔒 Private, 👥 Team or 🌐 Organisation. The server enforces it on every query, and the AI respects it too (below) |
@@ -173,7 +174,7 @@ Open http://localhost:5173. To run it the way production does (one port): `npm r
 
 ```bash
 cd server
-npm test          # 35 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
+npm test          # 44 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
 npm run typecheck
 ```
 
@@ -198,6 +199,7 @@ Nine access-control tests check: no token → 401; a private session is a 404 fo
 | Catch-up brief | a JSON fact sheet of the session (with today's date and an `overdue` flag per item), built by the server | headline, summary, your actions, open items, watch-outs |
 | Knowledge linking | each item/decision + its top 4 candidate docs | links with a one-sentence reason and a relevance score |
 | Conflict check | each new decision + its 5 most related earlier decisions | conflicting pairs with explanation and confidence |
+| Ask Relay | the 8 most relevant **passages** from documents the asker may see (uploaded files are split into ~1,200-character chunks, each embedded), grouped by document with real dates | answer + docId citations; uncited or invented citations → "not found" |
 
 **Reliability rules (in `server/src/ai/`)**
 - Every prompt says: use only the given input, never invent people or dates, reply in one exact JSON shape.
@@ -214,7 +216,7 @@ Nine access-control tests check: no token → 401; a private session is a 404 fo
 
 ## Data
 
-- **Schema** (`server/prisma/schema.prisma`): `Person`, `Team` + `TeamMember`, `Session` (meeting or transfer, with `visibility` + owning `teamId`, and `previousId` forming a chain), `Participant` (attendance), `Decision`, `ActionItem` (owner, due date, status, outcome, origin session and current session), `ItemEvent` (append-only history), `KnowledgeDoc` (with embedding, `visibility`, `teamId`, author), `KnowledgeLink` (with AI reason), `DecisionConflict`.
+- **Schema** (`server/prisma/schema.prisma`): `Person`, `Team` + `TeamMember`, `Session` (meeting or transfer, with `visibility` + owning `teamId`, and `previousId` forming a chain), `Participant` (attendance), `Decision`, `ActionItem` (owner, due date, status, outcome, origin session and current session), `ItemEvent` (append-only history), `KnowledgeDoc` (with embedding, `visibility`, `teamId`, author, and `fileName`/`fileType` for uploads), `DocChunk` (one ~1,200-character passage of a document, with its own embedding), `KnowledgeLink` (with AI reason), `DecisionConflict`.
 - **History is append-only.** Every create, status change, reassignment, due-date change, carry-forward and outcome writes an `ItemEvent`, so an item's whole life can be replayed.
 - **Integrity rules in the service layer:** an item can't close without an outcome (422); a session can't close with open items (409); a transfer needs two different people; people and sessions must exist (400/404). Multi-row changes run in transactions.
 - **Demo data** (`npm run db:seed`): 7 people in two teams, 10 sessions, 11 documents (+7 past-meeting docs), 2 conflicts. **Payments squad** (5 people): a Sprint 13 retro, Sprint 14 planning, three weekly syncs (one planned) and a **private** work transfer (Rahul going on leave, visible only to Rahul and Priya). **Customer support** (Kavya, Arjun): two weekly triages and a **private** 1-on-1. A 🌐 **company all-hands** everyone sees. Neha (product) is in both teams. It includes items carried forward up to three times, overdue and blocked items, closed items with outcomes, dropped items with reasons, an unassigned item, team / org-wide / private documents (incl. an incident postmortem and the refund policy) with AI-style links, and the launch-date conflicts.
@@ -259,7 +261,8 @@ All endpoints are under `/api`. Errors always look like `{ "error": { "code", "m
 | `POST /sessions/:id/brief` | Catch-up brief, optional `readerId` |
 | `GET /items`, `GET/PATCH /items/:id` | List (filter `open`, `overdue`, `status`, `ownerId`) / detail / update |
 | `POST /items/:id/link` | Re-run AI knowledge linking for one item |
-| `GET/POST /knowledge`, `DELETE /knowledge/:id` | Knowledge base |
+| `GET/POST /knowledge`, `DELETE /knowledge/:id` | Knowledge base (pasted text) |
+| `POST /knowledge/upload` | Multipart upload (`file`, optional `title`, `visibility`, `teamId`): extract text → chunk → embed. 415 unsupported type, 413 over 10 MB, 422 no readable text (e.g. scanned PDF) |
 | `GET /conflicts`, `PATCH /conflicts/:id` | List / resolve or dismiss |
 
 ## Project structure
@@ -320,6 +323,7 @@ Layout: `server/src/routes.ts` (HTTP + validation) → `server/src/services/*` (
 - **Visibility is fixed at creation** (by design: AI links and conflicts were computed for the original audience). Changing it would need those to be re-checked.
 - **No edit roles.** Anyone who can see a session can edit it; a team admin role would be the next step.
 - **No audio upload / transcription**, and no Slack/Gmail/Calendar connectors; input is pasted text.
+- **Scanned PDFs** (images of text) have no extractable text and are rejected with a clear message; OCR would be the next step. Only the text of a file is kept, so its layout, tables and images are lost.
 - **Retrieval is in-memory.** Embeddings are stored in Postgres but compared in Node, which is fine for hundreds of documents. At scale, move to `pgvector` with an index.
 - **AI quality is not measured with a labelled set.** Outputs are schema-checked and reviewed by the user, but there is no accuracy number yet.
 - **No reminders are sent.** Follow-up happens through overdue/carried flags, the Action items board and briefs, not email or chat notifications.

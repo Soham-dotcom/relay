@@ -5,6 +5,7 @@ import { prisma } from '../src/db.js';
 import { setAiProvider } from '../src/ai/client.js';
 import { issueToken } from '../src/auth.js';
 import { scripted } from './fakes.js';
+import { makePdf } from './fixtures.js';
 
 const app = createApp();
 type P = { id: string };
@@ -24,7 +25,7 @@ const as = (who: P) => {
 
 beforeEach(async () => {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE "DecisionConflict","KnowledgeLink","ItemEvent","ActionItem","Decision","KnowledgeDoc","Participant","Session","TeamMember","Team","Person" CASCADE',
+    'TRUNCATE "DecisionConflict","KnowledgeLink","DocChunk","ItemEvent","ActionItem","Decision","KnowledgeDoc","Participant","Session","TeamMember","Team","Person" CASCADE',
   );
   [alice, bob, carol, dave] = await Promise.all(
     ['alice', 'bob', 'carol', 'dave'].map((n) => prisma.person.create({ data: { name: `${n[0].toUpperCase()}${n.slice(1)} Test`, email: `${n}@test.dev` } })),
@@ -239,6 +240,60 @@ describe('what I missed, Ask Relay', () => {
     const res = (await as(alice).post('/api/ask', { question: 'When do releases go out?' })).body;
     expect(res.answer).toBeNull();
     expect(res.citations).toEqual([]);
+  });
+});
+
+describe('file uploads', () => {
+  const uploadAs = (who: P, file: Buffer, name: string, fields: Record<string, string> = {}) => {
+    let r = request(app).post('/api/knowledge/upload').set('Authorization', `Bearer ${issueToken(who.id)}`).attach('file', file, name);
+    for (const [k, v] of Object.entries(fields)) r = r.field(k, v);
+    return r;
+  };
+
+  it('stores a PDF as a searchable document, chunked, keeping only the text', async () => {
+    const res = await uploadAs(alice, makePdf(['Vendor contract summary.', 'The Razorpay contract renews on 1 March 2027.']), 'Vendor_contract.pdf', {
+      visibility: 'TEAM',
+      teamId: teamA,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ title: 'Vendor contract', fileName: 'Vendor_contract.pdf', fileType: 'pdf', pages: 1, chunks: 1 });
+    const doc = await prisma.knowledgeDoc.findUniqueOrThrow({ where: { id: res.body.id } });
+    expect(doc.content).toContain('renews on 1 March 2027');
+  });
+
+  it('Ask finds a fact deep inside a long uploaded file, not just its first page', async () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Section ${i + 1}. General notes about onboarding, laptops and office hours.`).join('\n\n');
+    const fact = 'Escalation contact: the payments on-call phone number is 98200-11111.';
+    const res = await uploadAs(alice, Buffer.from(`${filler}\n\n${fact}`), 'handbook.txt', { visibility: 'ORG' });
+    expect(res.body.chunks).toBeGreaterThan(1);
+
+    let prompt = '';
+    setAiProvider({
+      model: 'fake',
+      embed: async (texts) => texts.map(() => []),
+      async generateText(_s, p) {
+        prompt = p;
+        return JSON.stringify({ found: true, answer: 'Call 98200-11111.', citations: [JSON.parse(p).documents[0].docId] });
+      },
+    });
+    const answer = (await as(carol).post('/api/ask', { question: 'What is the payments on-call phone number for escalation?' })).body;
+    expect(prompt).toContain('98200-11111'); // the passage from the end of the file reached the model
+    expect(answer.citations.map((c: { fileName: string }) => c.fileName)).toEqual(['handbook.txt']);
+  });
+
+  it('applies visibility to uploads: a private file is invisible to teammates', async () => {
+    await uploadAs(alice, Buffer.from('Salary bands for the team, confidential notes.'), 'salaries.txt', { visibility: 'PRIVATE' });
+    const titles = async (p: P) => (await as(p).get('/api/knowledge')).body.map((d: { title: string }) => d.title);
+    expect(await titles(alice)).toContain('salaries');
+    expect(await titles(bob)).not.toContain('salaries');
+  });
+
+  it('rejects unsupported and missing files with clear errors', async () => {
+    const bad = await uploadAs(alice, Buffer.from('MZ...'), 'setup.exe', { visibility: 'ORG' });
+    expect(bad.status).toBe(415);
+    expect(bad.body.error.code).toBe('UNSUPPORTED_FILE');
+    const none = await as(alice).post('/api/knowledge/upload', {});
+    expect(none.status).toBe(400);
   });
 });
 

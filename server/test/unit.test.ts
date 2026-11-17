@@ -6,6 +6,9 @@ import { matchOwner } from '../src/services/recap.js';
 import { filterOwnActivity } from '../src/services/activity.js';
 import { withModelFallback } from '../src/ai/provider.js';
 import { scripted } from './fakes.js';
+import { makePdf } from './fixtures.js';
+import { extractText } from '../src/lib/extract.js';
+import { chunkText } from '../src/lib/chunk.js';
 
 afterEach(() => setAiProvider(null));
 
@@ -32,6 +35,42 @@ describe('generateJson', () => {
   it('reports AI_UNAVAILABLE when no key is configured', async () => {
     setAiProvider(null);
     await expect(generateJson('t', schema, 's', 'p')).rejects.toMatchObject({ status: 503, code: 'AI_UNAVAILABLE' });
+  });
+});
+
+describe('file text extraction and chunking', () => {
+  it('reads the text of a real PDF', async () => {
+    const { text, kind, pages } = await extractText(makePdf(['Refund policy for failed debits.', 'Refunds are paid within 3 working days.']), 'Policy.pdf');
+    expect(kind).toBe('pdf');
+    expect(pages).toBe(1);
+    expect(text).toContain('within 3 working days');
+  });
+
+  it('reads plain text and Markdown files', async () => {
+    const { text, kind } = await extractText(Buffer.from('# Runbook\nRestart the worker, then replay failed events.'), 'runbook.md');
+    expect(kind).toBe('text');
+    expect(text).toContain('replay failed events');
+  });
+
+  it('rejects unsupported types, renamed files and empty files with clear errors', async () => {
+    await expect(extractText(Buffer.from('MZ binary'), 'tool.exe')).rejects.toMatchObject({ status: 415, code: 'UNSUPPORTED_FILE' });
+    await expect(extractText(Buffer.from('just text, not a pdf at all'), 'fake.pdf')).rejects.toMatchObject({ status: 415 });
+    await expect(extractText(Buffer.from('   '), 'empty.txt')).rejects.toMatchObject({ status: 422, code: 'NO_TEXT' });
+  });
+
+  it('keeps a short document as one passage', () => {
+    expect(chunkText('A short note about the release process.')).toHaveLength(1);
+  });
+
+  it('splits a long document into overlapping passages without losing text', () => {
+    const paragraphs = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1}: ${'details about the payment system. '.repeat(4)}`);
+    const text = paragraphs.join('\n\n');
+    const chunks = chunkText(text, 1200, 150);
+    expect(chunks.length).toBeGreaterThan(3);
+    expect(chunks.every((c) => c.length <= 1200)).toBe(true);
+    // Every paragraph label survives somewhere, and passages overlap.
+    for (let i = 1; i <= 30; i++) expect(chunks.some((c) => c.includes(`Paragraph ${i}:`))).toBe(true);
+    expect(chunks[1].slice(0, 40)).not.toBe(chunks[0].slice(0, 40));
   });
 });
 

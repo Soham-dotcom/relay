@@ -5,6 +5,7 @@ import { logger } from '../logger.js';
 import { embedTexts, generateJson, isAiAvailable } from '../ai/client.js';
 import { LINK_SYSTEM, linkSchema } from '../ai/prompts.js';
 import { rankCandidates } from '../lib/similarity.js';
+import { chunkText } from '../lib/chunk.js';
 import {
   covers,
   docAudience,
@@ -24,10 +25,24 @@ const CANDIDATES_PER_TARGET = 4;
 /** Below this, an automatic (non-AI) match is too weak to show. */
 const FALLBACK_MIN_SCORE = 0.35;
 
-export async function createDoc(input: { title: string; content: string; visibility: Visibility; teamId?: string | null }, viewer: Viewer) {
+/** How much of a long document goes into its single doc-level vector (used for linking). */
+const DOC_VECTOR_CHARS = 6000;
+/** Embedding requests are batched; this keeps each request well under the provider's limit. */
+const EMBED_BATCH = 50;
+
+export interface NewDoc {
+  title: string;
+  content: string;
+  visibility: Visibility;
+  teamId?: string | null;
+  fileName?: string;
+  fileType?: string;
+}
+
+export async function createDoc(input: NewDoc, viewer: Viewer) {
   if (input.visibility === 'TEAM' && !input.teamId) throw new AppError(400, 'TEAM_REQUIRED', 'Choose the team this document belongs to');
   if (input.teamId && !viewer.teamIds.includes(input.teamId)) throw new AppError(400, 'INVALID_TEAM', 'You can only add documents for a team you belong to');
-  const [vector] = (await embedTexts('kb.embed_doc', [`${input.title}\n${input.content}`])) ?? [[]];
+  const [vector] = (await embedTexts('kb.embed_doc', [`${input.title}\n${input.content.slice(0, DOC_VECTOR_CHARS)}`])) ?? [[]];
   const doc = await prisma.knowledgeDoc.create({
     data: {
       title: input.title,
@@ -35,11 +50,40 @@ export async function createDoc(input: { title: string; content: string; visibil
       visibility: input.visibility,
       teamId: input.visibility === 'TEAM' ? input.teamId : null,
       createdById: viewer.id,
+      fileName: input.fileName,
+      fileType: input.fileType,
       embedding: vector,
     },
   });
-  logger.info({ event: 'kb.doc_created', docId: doc.id, visibility: doc.visibility, embedded: vector.length > 0 }, 'knowledge doc created');
-  return doc;
+  const chunks = await indexChunks(doc.id, input.title, input.content);
+  logger.info(
+    { event: 'kb.doc_created', docId: doc.id, visibility: doc.visibility, fileType: input.fileType ?? 'text', chars: input.content.length, chunks: chunks.count, embedded: chunks.embedded },
+    'knowledge doc created',
+  );
+  return { ...doc, chunks: chunks.count };
+}
+
+/**
+ * Splits a document into passages and embeds each one, so Ask can find the right part of a long file.
+ * Embeddings are best-effort: if they fail, the passages are still stored and found by keyword search.
+ */
+export async function indexChunks(docId: string, title: string, content: string) {
+  const parts = chunkText(content);
+  let embedded = 0;
+  const rows: { docId: string; index: number; text: string; embedding: number[] }[] = [];
+  for (let i = 0; i < parts.length; i += EMBED_BATCH) {
+    const batch = parts.slice(i, i + EMBED_BATCH);
+    // The title is prepended so a passage like "It must be approved by the lead" still knows what "it" is.
+    const vectors = await embedTexts('kb.embed_chunks', batch.map((p) => `${title}\n${p}`));
+    batch.forEach((text, j) => {
+      const embedding = vectors?.[j] ?? [];
+      if (embedding.length) embedded++;
+      rows.push({ docId, index: i + j, text, embedding });
+    });
+  }
+  await prisma.docChunk.deleteMany({ where: { docId } });
+  if (rows.length) await prisma.docChunk.createMany({ data: rows });
+  return { count: rows.length, embedded };
 }
 
 export async function deleteDoc(id: string) {
@@ -47,8 +91,11 @@ export async function deleteDoc(id: string) {
   logger.info({ event: 'kb.doc_deleted', docId: id }, 'knowledge doc deleted');
 }
 
-export function listDocs(q: string | undefined, viewer: Viewer) {
-  return prisma.knowledgeDoc.findMany({
+/** A long uploaded file can be hundreds of KB; the list only needs a preview. */
+const PREVIEW_CHARS = 700;
+
+export async function listDocs(q: string | undefined, viewer: Viewer) {
+  const docs = await prisma.knowledgeDoc.findMany({
     where: {
       AND: [
         docWhere(viewer),
@@ -64,6 +111,9 @@ export function listDocs(q: string | undefined, viewer: Viewer) {
       team: { select: { id: true, name: true } },
       sessionId: true,
       createdAt: true,
+      fileName: true,
+      fileType: true,
+      _count: { select: { chunks: true } },
       // An org-wide doc can be linked to a team decision; only show links to things this viewer can see.
       links: {
         where: { OR: [{ item: itemWhere(viewer) }, { decision: { session: sessionWhere(viewer) } }] },
@@ -75,6 +125,12 @@ export function listDocs(q: string | undefined, viewer: Viewer) {
     },
     orderBy: { createdAt: 'desc' },
   });
+  return docs.map(({ content, _count, ...d }) => ({
+    ...d,
+    content: content.length > PREVIEW_CHARS ? `${content.slice(0, PREVIEW_CHARS)}…` : content,
+    chars: content.length,
+    chunks: _count.chunks,
+  }));
 }
 
 /** Turns a held session into a knowledge doc, so later meetings can be linked to it. Access follows the session. */

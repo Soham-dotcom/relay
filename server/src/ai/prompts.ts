@@ -110,7 +110,8 @@ export const askSchema = z.object({
   citations: z.array(z.string()).max(6),
 });
 
-export const ASK_SYSTEM = `You answer a team member's question using ONLY the documents provided (team documents and past meeting records).
+export const ASK_SYSTEM = `You answer a team member's question using ONLY the documents provided (team documents, uploaded files and past meeting records).
+Each document gives only the passages most relevant to the question, not its full text.
 Rules:
 - If the documents do not contain the answer, set found=false, answer="", citations=[]. Never guess or use outside knowledge.
 - Otherwise answer in 1-4 plain sentences with concrete facts (names, dates, numbers).

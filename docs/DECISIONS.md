@@ -101,3 +101,15 @@ Each entry: what was chosen, why, what was rejected, and the trade-off accepted.
 ### D21. Keep-alive ping for the free Render tier
 - **Why:** measured a 90+ second cold start on 2026-11-17. A reviewer opening the link would see a hanging page. A GitHub Actions cron pings `/api/health` every 10 minutes.
 - **Trade-off:** uses ~730 of Render's 750 free monthly hours; GitHub may delay scheduled runs a little, so a rare cold start is still possible.
+
+### D22. Chunked retrieval (RAG) for documents and uploaded files
+- **What:** every new document is split into ~1,200-character passages with a 150-character overlap, preferring paragraph and sentence breaks; each passage gets its own embedding (title prepended). Ask ranks passages across all visible documents and sends the best 8, grouped by document.
+- **Why:** before this, a document had one embedding and Ask read only its first 1,200 characters, so a fact on page 20 of a PDF was invisible. One vector per long file is a blurry average; one per passage stays about one topic.
+- **Rejected:** sending whole files to the model (slow, expensive, hits context limits); a vector database (one more service; an in-memory scan is fine at this size — pgvector is the upgrade path).
+- **Trade-off:** more embedding calls on upload (batched 50 at a time, best-effort: passages are still stored and found by keywords if embedding fails). Older documents without passages still count as one passage, so nothing needed a backfill.
+
+### D23. Uploads: extract text in memory, never store the file
+- **What:** multer memory storage, 10 MB limit, one file. PDF via `unpdf` (pdf.js), Word via `mammoth`, text files as UTF-8. The extension decides the parser and the content confirms it (`%PDF-` / zip signature), so a renamed file can't reach the wrong parser. Text over 300k characters (~150 pages) is refused.
+- **Why:** the knowledge base needs the text, not the file. Not storing files means no file storage service, no malware sitting on disk, and nothing to leak but text that already follows the visibility rules.
+- **Rejected:** storing originals in S3 / R2 (useful for "download original", but a new service and a new risk for a feature nobody asked for).
+- **Trade-off:** layout, tables and images are lost; scanned PDFs need OCR (rejected with a clear 422 today).

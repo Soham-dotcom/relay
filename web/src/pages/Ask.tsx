@@ -65,7 +65,7 @@ export default function AskPage() {
                   <li key={c.id} className="text-sm">
                     <span className="mr-1.5 rounded bg-violet-100 px-1.5 text-xs font-semibold text-violet-800">{i + 1}</span>
                     <Link className="text-teal-700 hover:underline" to={sourceLink(c)}>
-                      {c.source === 'MEETING' ? '🗓️' : '📄'} {c.title}
+                      {c.source === 'MEETING' ? '🗓️' : c.fileName ? '📎' : '📄'} {c.title}
                     </Link>
                   </li>
                 ))}
@@ -84,7 +84,7 @@ export default function AskPage() {
                 {r.sources.map((s) => (
                   <li key={s.id} className="text-sm">
                     <Link className="text-teal-700 hover:underline" to={sourceLink(s)}>
-                      {s.source === 'MEETING' ? '🗓️' : '📄'} {s.title}
+                      {s.source === 'MEETING' ? '🗓️' : s.fileName ? '📎' : '📄'} {s.title}
                     </Link>
                   </li>
                 ))}

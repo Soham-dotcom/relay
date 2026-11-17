@@ -44,6 +44,10 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
       code = err.code === 'P2025' ? 'NOT_FOUND' : 'INVALID_REFERENCE';
       message = err.code === 'P2025' ? 'Record not found' : 'Referenced record does not exist';
     }
+  } else if (err?.name === 'MulterError') {
+    status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    code = err.code === 'LIMIT_FILE_SIZE' ? 'FILE_TOO_LARGE' : 'BAD_UPLOAD';
+    message = err.code === 'LIMIT_FILE_SIZE' ? 'File is larger than 10 MB' : `Upload rejected: ${err.message}`;
   } else if (err?.type === 'entity.parse.failed') {
     status = 400;
     code = 'INVALID_JSON';

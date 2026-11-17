@@ -1,4 +1,5 @@
 import { Router, type Request } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 import { prisma } from './db.js';
 import { isAiAvailable } from './ai/client.js';
@@ -14,6 +15,10 @@ import { createDoc, deleteDoc, linkToKnowledge, listDocs } from './services/know
 import { applyRecap, draftRecap } from './services/recap.js';
 import * as sessions from './services/sessions.js';
 import { logger } from './logger.js';
+import { extractText, UPLOAD_MAX_BYTES } from './lib/extract.js';
+
+/** In-memory only: the file never touches disk, and only its extracted text is kept. */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_MAX_BYTES, files: 1, fields: 5 } });
 
 const id = z.string().min(1).max(40);
 const text = (max: number) => z.string().trim().max(max);
@@ -242,6 +247,24 @@ api.post('/knowledge', async (req, res) => {
     .object({ title: text(200).min(1), content: text(50000).min(1), visibility: visibility.default('TEAM'), teamId: id.nullish() })
     .parse(req.body);
   res.status(201).json(await createDoc(body, viewerOf(req)));
+});
+
+/**
+ * Upload a file (PDF, Word, text, Markdown, CSV). The file is read in memory, its text extracted,
+ * chunked and embedded; the file itself is never written to disk or stored.
+ */
+api.post('/knowledge/upload', upload.single('file'), async (req, res) => {
+  if (!req.file) throw new AppError(400, 'FILE_REQUIRED', 'Attach a file in the "file" field');
+  const body = z
+    .object({ title: text(200).optional(), visibility: visibility.default('TEAM'), teamId: id.nullish().or(z.literal('').transform(() => null)) })
+    .parse(req.body);
+  // Browsers send the name as latin1 bytes; decode so names like "Résumé.pdf" survive.
+  const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf8').slice(0, 200);
+  const { text: content, kind, pages } = await extractText(req.file.buffer, fileName);
+  const title = body.title || fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Uploaded document';
+  const doc = await createDoc({ title, content, visibility: body.visibility, teamId: body.teamId, fileName, fileType: kind }, viewerOf(req));
+  logger.info({ event: 'kb.file_uploaded', docId: doc.id, fileType: kind, bytes: req.file.size, pages, chunks: doc.chunks }, 'file uploaded to knowledge base');
+  res.status(201).json({ id: doc.id, title: doc.title, fileName, fileType: kind, pages: pages ?? null, chars: content.length, chunks: doc.chunks });
 });
 api.delete('/knowledge/:id', async (req, res) => {
   const docId = id.parse(req.params.id);
