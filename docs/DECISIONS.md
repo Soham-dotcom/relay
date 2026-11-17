@@ -85,3 +85,19 @@ Each entry: what was chosen, why, what was rejected, and the trade-off accepted.
 
 ### D18. 404, not 403, for records you can't see
 - **Why:** a 403 confirms the record exists ("there is a private meeting with this id"). A 404 reveals nothing. The denial is still logged as `access.denied` for auditing.
+
+### D19. Model fallback chain instead of one hard-coded model
+- **What:** `GEMINI_MODEL` takes a comma-separated list. A call moves to the next model only on 404 (retired), 429 (quota/rate limit) or 503 (overloaded).
+- **Why:** this happened for real: `gemini-2.5-flash` was withdrawn for new API projects (404) and the free tier allows ~20 requests/day per model (429). One env var change keeps the AI working; no code change.
+- **Rejected:** retrying the same model (doesn't help a 404 or a daily quota); falling back on every error (a bad request fails the same way on every model, so it only adds latency).
+- **Trade-off:** answers can come from a different model than usual; the log line records which one answered.
+
+### D20. 10-minute answer cache for briefs and Ask, keyed by the prompt hash
+- **Why:** many reviewers click the same demo buttons. Identical data + question = identical prompt, so reusing the answer is correct, instant and saves quota.
+- **Safety:** the key is a SHA-256 of the full prompt, which is built from current data (and today's date for briefs). Any data change produces a different key, so a stale answer is never served. Write operations (recap, linking, conflicts) are never cached.
+- **Rejected:** caching by session id (would serve stale briefs after an edit); Redis (one more service for a single-instance app).
+- **Trade-off:** in-memory, per instance, lost on restart. Fine for one instance; a shared cache would be needed when scaling out.
+
+### D21. Keep-alive ping for the free Render tier
+- **Why:** measured a 90+ second cold start on 2026-11-17. A reviewer opening the link would see a hanging page. A GitHub Actions cron pings `/api/health` every 10 minutes.
+- **Trade-off:** uses ~730 of Render's 750 free monthly hours; GitHub may delay scheduled runs a little, so a rare cold start is still possible.

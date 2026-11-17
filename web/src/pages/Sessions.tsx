@@ -2,24 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ActionItem, type Conflict, type MissedSession, type Person, type SessionKind, type SessionSummary, type Visibility } from '../api';
-import {
-  AvatarStack,
-  Badge,
-  Button,
-  Empty,
-  ErrorBox,
-  Field,
-  inputCls,
-  isOverdue,
-  Loading,
-  Modal,
-  Stat,
-  StatusBadge,
-  VisibilityBadge,
-  VisibilityPicker,
-  fmtDate,
-} from '../ui';
-import { useMe } from '../App';
+import { AvatarStack, Badge, Button, Empty, ErrorBox, Field, inputCls, Loading, Modal, Stat, StatusBadge, VisibilityBadge, VisibilityPicker } from '../ui';
+import { isOverdue, fmtDate } from '../format';
+import { useMe } from '../hooks';
 
 export default function SessionsPage() {
   const [kind, setKind] = useState<'' | SessionKind>('');
@@ -140,7 +125,7 @@ function NewSessionModal({ sessions, onClose }: { sessions: SessionSummary[]; on
   const qc = useQueryClient();
   const navigate = useNavigate();
   const withOpen = sessions.filter((s) => s.openItems > 0);
-  const [f, setF] = useState({
+  const [f, setF] = useState(() => ({
     kind: 'MEETING' as SessionKind,
     title: '',
     scheduledAt: new Date().toISOString().slice(0, 10),
@@ -151,7 +136,7 @@ function NewSessionModal({ sessions, onClose }: { sessions: SessionSummary[]; on
     fromPersonId: '',
     toPersonId: '',
     carryFromId: withOpen[0]?.id ?? '',
-  });
+  }));
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
 
   const create = useMutation({

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, auth, type Conflict, type Me } from './api';
+import { api, auth, type Conflict } from './api';
 import SessionsPage from './pages/Sessions';
 import SessionPage from './pages/SessionDetail';
 import ItemsPage from './pages/Items';
 import KnowledgePage from './pages/Knowledge';
 import ConflictsPage from './pages/Conflicts';
 import SignIn from './pages/SignIn';
+import { useMe } from './hooks';
 import AskPage from './pages/Ask';
 import ActivityPage from './pages/Activity';
 import { Avatar, Loading } from './ui';
@@ -29,8 +30,6 @@ export default function App() {
   return <Shell />;
 }
 
-/** The signed-in user. Every page reads it from this cached query. */
-export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/auth/me'), staleTime: Infinity });
 
 function Shell() {
   const me = useMe();
@@ -96,7 +95,19 @@ function Shell() {
           <Route path="/conflicts" element={<ConflictsPage />} />
           <Route path="/ask" element={<AskPage />} />
           <Route path="/activity" element={<ActivityPage />} />
-          <Route path="*" element={<p className="text-sm text-slate-600">Page not found.</p>} />
+          <Route
+            path="*"
+            element={
+              <div className="mx-auto max-w-md py-20 text-center">
+                <p className="text-5xl font-semibold text-teal-700">404</p>
+                <h1 className="mt-3 text-lg font-semibold text-slate-900">This page doesn't exist, or you can't see it</h1>
+                <p className="mt-1 text-sm text-slate-600">Private and team-only pages look like this to people outside them.</p>
+                <NavLink to="/" className="mt-6 inline-block rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800">
+                  Back to sessions
+                </NavLink>
+              </div>
+            }
+          />
         </Routes>
       </main>
     </div>

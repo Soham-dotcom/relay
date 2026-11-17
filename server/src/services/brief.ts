@@ -119,7 +119,7 @@ export async function catchUpBrief(sessionId: string, viewer: Viewer, readerId?:
   const ctx = await buildBriefContext(sessionId, viewer, readerId);
   if (isAiAvailable()) {
     try {
-      const brief = await generateJson('brief.generate', briefSchema, BRIEF_SYSTEM, JSON.stringify(ctx));
+      const brief = await generateJson('brief.generate', briefSchema, BRIEF_SYSTEM, JSON.stringify(ctx), { cacheTtlMs: 10 * 60_000 });
       logger.info({ event: 'brief.generated', sessionId, readerId, source: 'ai' }, 'catch-up brief generated');
       return { source: 'ai' as const, brief };
     } catch {

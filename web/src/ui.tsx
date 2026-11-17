@@ -2,12 +2,6 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, type ItemStatus, type SessionStatus, type Visibility } from './api';
 
-export const fmtDate = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-
-export const isOverdue = (due: string | null, status: ItemStatus) =>
-  Boolean(due && new Date(due) < new Date() && ['OPEN', 'IN_PROGRESS', 'BLOCKED'].includes(status));
-
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ai';
 const variants: Record<Variant, string> = {
   primary: 'bg-teal-700 text-white hover:bg-teal-800',

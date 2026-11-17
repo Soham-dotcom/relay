@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, type ActionItem, type Person } from '../api';
-import { Card, Empty, ErrorBox, inputCls, isOverdue, Loading, Stat } from '../ui';
+import { Card, Empty, ErrorBox, inputCls, Loading, Stat } from '../ui';
+import { isOverdue } from '../format';
 import { ItemRow } from '../components/ItemRow';
 
 export default function ItemsPage() {

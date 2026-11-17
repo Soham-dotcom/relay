@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type ActionItem, type ItemStatus, type Person } from '../api';
-import { Avatar, Badge, Button, ErrorBox, fmtDate, inputCls, isOverdue, StatusBadge } from '../ui';
+import { Avatar, Badge, Button, ErrorBox, inputCls, StatusBadge } from '../ui';
+import { fmtDate, isOverdue } from '../format';
 
 const STATUSES: ItemStatus[] = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'DROPPED'];
 const CLOSED = ['DONE', 'DROPPED'];

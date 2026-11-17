@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Attendance, type Brief, type Person, type RecapDraft, type SessionDetail, type SessionStatus, type SessionSummary } from '../api';
-import { Avatar, Badge, Button, Card, Empty, ErrorBox, fmtDate, inputCls, Loading, StatusBadge, VisibilityBadge } from '../ui';
+import { ApiError, api, type Attendance, type Brief, type Person, type RecapDraft, type SessionDetail, type SessionStatus, type SessionSummary } from '../api';
+import { Avatar, AvatarStack, Badge, Button, Card, Empty, ErrorBox, inputCls, Loading, StatusBadge, VisibilityBadge } from '../ui';
+import { fmtDate } from '../format';
 import { ItemRow, NewItemForm } from '../components/ItemRow';
-import { useMe } from '../App';
+import { useMe } from '../hooks';
 
 export default function SessionPage() {
   const { id = '' } = useParams();
@@ -12,6 +13,17 @@ export default function SessionPage() {
   const people = useQuery({ queryKey: ['people'], queryFn: () => api<Person[]>('/people') });
 
   if (session.isLoading) return <Loading />;
+  if (session.error instanceof ApiError && session.error.status === 404)
+    return (
+      <div className="mx-auto max-w-md py-20 text-center">
+        <p className="text-4xl">🔒</p>
+        <h1 className="mt-3 text-lg font-semibold text-slate-900">Session not found</h1>
+        <p className="mt-1 text-sm text-slate-600">It doesn't exist, or it's private or belongs to a team you're not in.</p>
+        <Link to="/" className="mt-6 inline-block rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800">
+          Back to sessions
+        </Link>
+      </div>
+    );
   if (session.error) return <ErrorBox error={session.error} />;
   const s = session.data!;
   const everyone = people.data ?? [];
@@ -68,8 +80,18 @@ function Header({ s }: { s: SessionDetail }) {
             <VisibilityBadge visibility={s.visibility} team={s.team} />
             <span className="text-sm text-slate-500">{fmtDate(s.scheduledAt)}</span>
           </div>
-          <h1 className="mt-1 text-xl font-semibold text-slate-900">{s.title}</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{s.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+            <AvatarStack names={s.participants.map((p) => p.person.name)} />
+            <span>
+              {s.decisions.length} decision{s.decisions.length === 1 ? '' : 's'} ·{' '}
+              {(() => { const n = s.items.filter((i) => ['OPEN', 'IN_PROGRESS', 'BLOCKED'].includes(i.status)).length; return `${n} open item${n === 1 ? '' : 's'}`; })()}
+              {s.participants.some((p) => p.attendance === 'MISSED') && (
+                <> · <b className="text-red-700">{s.participants.filter((p) => p.attendance === 'MISSED').length} missed it</b></>
+              )}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
             {s.previous && <>Follows <Link className="text-teal-700 hover:underline" to={`/sessions/${s.previous.id}`}>{s.previous.title}</Link>. </>}
             {s.next.map((n) => <span key={n.id}>Continued in <Link className="text-teal-700 hover:underline" to={`/sessions/${n.id}`}>{n.title}</Link>. </span>)}
           </p>
@@ -93,8 +115,13 @@ function TransferPanel({ s }: { s: SessionDetail }) {
   const hand = useMutation({ mutationFn: () => api<{ reassigned: number }>(`/sessions/${s.id}/transfer-items`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries() });
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm">
-      <span>
-        <b>{s.fromPerson?.name}</b> is handing over to <b>{s.toPerson?.name}</b>.
+      <span className="flex items-center gap-2">
+        {s.fromPerson && <Avatar name={s.fromPerson.name} />}
+        <b>{s.fromPerson?.name}</b>
+        <span aria-hidden className="text-violet-500">→</span>
+        {s.toPerson && <Avatar name={s.toPerson.name} />}
+        <b>{s.toPerson?.name}</b>
+        <span className="text-violet-800">work hand-over</span>
       </span>
       <Button variant="secondary" busy={hand.isPending} onClick={() => hand.mutate()} className="ml-auto">
         Reassign all of {s.fromPerson?.name.split(' ')[0]}'s open items to {s.toPerson?.name.split(' ')[0]}
@@ -263,7 +290,7 @@ function CarryForward({ s }: { s: SessionDetail }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select aria-label="Carry forward to" className={`${inputCls} !w-52`} value={to} onChange={(e) => setTo(e.target.value)}>
-        <option value="">Carry {open} open item(s) to…</option>
+        <option value="">Carry {open} open item{open === 1 ? '' : 's'} to…</option>
         {targets.map((t) => <option key={t.id} value={t.id}>{t.title} ({fmtDate(t.scheduledAt)})</option>)}
       </select>
       <Button variant="secondary" disabled={!to} busy={carry.isPending} onClick={() => carry.mutate()}>Carry forward</Button>

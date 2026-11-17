@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type Conflict } from '../api';
-import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading, fmtDate } from '../ui';
+import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '../ui';
+import { fmtDate } from '../format';
 
 export default function ConflictsPage() {
   const [status, setStatus] = useState<'OPEN' | 'RESOLVED' | 'DISMISSED'>('OPEN');

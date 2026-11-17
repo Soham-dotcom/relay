@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { z } from 'zod';
 import { aiEnabled, config } from '../config.js';
 import { AppError } from '../errors.js';
@@ -9,6 +10,7 @@ let provider: AiProvider | null = aiEnabled ? new GeminiProvider(config.GEMINI_A
 /** Tests inject a fake provider; null simulates "no API key configured". */
 export function setAiProvider(p: AiProvider | null) {
   provider = p;
+  cache.clear();
 }
 
 export function isAiAvailable() {
@@ -17,8 +19,34 @@ export function isAiAvailable() {
 
 export class AiUnavailableError extends AppError {
   constructor(reason: string) {
-    super(503, 'AI_UNAVAILABLE', `AI is unavailable right now: ${reason}`);
+    // Provider errors can be long JSON blobs; the full text is in the logs, the user gets a short line.
+    super(503, 'AI_UNAVAILABLE', `AI is unavailable right now: ${reason.slice(0, 120)}`);
   }
+}
+
+// ---------- Answer cache ----------
+// Read-only AI answers (briefs, Ask) depend only on their prompt, and the prompt is built from the
+// data. Same data + same question = same prompt, so a recent answer can be reused: faster for the
+// user and it saves the free-tier quota when many people click the same demo buttons. Any change to
+// the underlying data changes the prompt, so a stale answer is never served.
+const CACHE_MAX = 200;
+const cache = new Map<string, { value: unknown; expires: number }>();
+
+function cacheKey(op: string, system: string, prompt: string) {
+  return `${op}:${createHash('sha256').update(system).update('\0').update(prompt).digest('hex')}`;
+}
+function cacheGet(key: string) {
+  const hit = cache.get(key);
+  if (!hit) return undefined;
+  if (hit.expires < Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+function cacheSet(key: string, value: unknown, ttlMs: number) {
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!); // drop the oldest entry
+  cache.set(key, { value, expires: Date.now() + ttlMs });
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -47,8 +75,15 @@ export async function generateJson<S extends z.ZodTypeAny>(
   schema: S,
   system: string,
   prompt: string,
+  opts: { cacheTtlMs?: number } = {},
 ): Promise<z.infer<S>> {
   if (!provider) throw new AiUnavailableError('no GEMINI_API_KEY configured');
+  const key = opts.cacheTtlMs ? cacheKey(op, system, prompt) : null;
+  const cached = key ? cacheGet(key) : undefined;
+  if (cached !== undefined) {
+    logger.info({ event: 'ai.cache_hit', op }, 'AI answer served from cache');
+    return cached as z.infer<S>;
+  }
   let lastError = '';
 
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -63,6 +98,7 @@ export async function generateJson<S extends z.ZodTypeAny>(
       const latencyMs = Date.now() - started;
       if (result.success) {
         logger.info({ event: 'ai.call', op, model: provider.model, attempt, latencyMs, outcome: 'ok' }, 'AI call succeeded');
+        if (key) cacheSet(key, result.data, opts.cacheTtlMs!);
         return result.data;
       }
       lastError = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');

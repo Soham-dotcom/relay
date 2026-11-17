@@ -4,6 +4,7 @@ import { extractJson, generateJson, setAiProvider, AiUnavailableError } from '..
 import { cosine, keywordScore, rankCandidates } from '../src/lib/similarity.js';
 import { matchOwner } from '../src/services/recap.js';
 import { filterOwnActivity } from '../src/services/activity.js';
+import { withModelFallback } from '../src/ai/provider.js';
 import { scripted } from './fakes.js';
 
 afterEach(() => setAiProvider(null));
@@ -31,6 +32,42 @@ describe('generateJson', () => {
   it('reports AI_UNAVAILABLE when no key is configured', async () => {
     setAiProvider(null);
     await expect(generateJson('t', schema, 's', 'p')).rejects.toMatchObject({ status: 503, code: 'AI_UNAVAILABLE' });
+  });
+});
+
+describe('model fallback and answer cache', () => {
+  it('moves to the next model only when a model is retired, rate-limited or overloaded', async () => {
+    const tried: string[] = [];
+    const res = await withModelFallback(['old', 'busy', 'good'], async (m) => {
+      tried.push(m);
+      if (m === 'old') throw new Error('{"error":{"code":404,"message":"no longer available"}}');
+      if (m === 'busy') throw new Error('429 RESOURCE_EXHAUSTED');
+      return 'answer';
+    });
+    expect(res).toEqual({ model: 'good', value: 'answer' });
+    expect(tried).toEqual(['old', 'busy', 'good']);
+  });
+
+  it('does not try other models for an ordinary error', async () => {
+    const tried: string[] = [];
+    await expect(
+      withModelFallback(['a', 'b'], async (m) => {
+        tried.push(m);
+        throw new Error('400 invalid argument');
+      }),
+    ).rejects.toThrow('400');
+    expect(tried).toEqual(['a']);
+  });
+
+  it('reuses a cached answer for an identical prompt, not for a different one', async () => {
+    const p = scripted(['{"answer": 1}', '{"answer": 2}']);
+    setAiProvider(p);
+    const schema = z.object({ answer: z.number() });
+    const opts = { cacheTtlMs: 60_000 };
+    expect(await generateJson('t', schema, 's', 'same', opts)).toEqual({ answer: 1 });
+    expect(await generateJson('t', schema, 's', 'same', opts)).toEqual({ answer: 1 });
+    expect(await generateJson('t', schema, 's', 'different', opts)).toEqual({ answer: 2 });
+    expect(p.calls).toHaveLength(2);
   });
 });
 

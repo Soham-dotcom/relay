@@ -42,7 +42,7 @@ export async function ask(question: string, viewer: Viewer) {
       .sort((a, b) => a.date.localeCompare(b.date)), // oldest first, so "latest" is unambiguous
   });
   try {
-    const res = await generateJson('ask.answer', askSchema, ASK_SYSTEM, prompt);
+    const res = await generateJson('ask.answer', askSchema, ASK_SYSTEM, prompt, { cacheTtlMs: 10 * 60_000 });
     const sent = new Set(top.map((d) => d.id));
     const citations = [...new Set(res.citations.filter((id) => sent.has(id)))];
     const dropped = res.citations.length - citations.length;

@@ -8,9 +8,19 @@
 
 **AI-powered knowledge and task hand-over for teams.** Relay captures what was discussed and decided in a meeting or a work transfer, hands that context to the right people, and follows every action item until it is closed with an outcome.
 
-> **Live demo: https://relay-h9qf.onrender.com**. Pick a demo person on the sign-in screen (no password) and switch people to see the access rules work. The free tier sleeps when idle, so the first request can take ~30-50 s.
+> **Live demo: https://relay-h9qf.onrender.com** · pick a demo person (no password) and switch people to see the access rules work.
 
-**Contents:** [Features](#features) · [Using Relay](#using-relay-a-5-minute-tour) · [Special feature](#-special-feature-decision-conflict-check) · [Access control](#access-control-the-right-context-for-the-right-people) · [Tech stack](#tech-stack) · [Run locally](#run-it-locally) · [AI configuration](#ai-configuration) · [Data](#data) · [Logging](#logging) · [API](#api) · [Project structure](#project-structure) · [Approach](#approach) · [Assumptions](#assumptions) · [Limitations](#known-limitations) · [Deploy](#deploy-render--neon) · [Contributing](#contributing)
+![Relay: sessions overview with catch-up panel and counters](.github/assets/home.png)
+
+**Contents:** [Screenshots](#screenshots) · [Features](#features) · [Architecture](#architecture) · [Using Relay](#using-relay-a-5-minute-tour) · [Special feature](#-special-feature-decision-conflict-check) · [Access control](#access-control-the-right-context-for-the-right-people) · [Tech stack](#tech-stack) · [Run locally](#run-it-locally) · [AI configuration](#ai-configuration) · [Data](#data) · [Logging](#logging) · [API](#api) · [Project structure](#project-structure) · [Approach](#approach) · [Assumptions](#assumptions) · [Limitations](#known-limitations) · [Deploy](#deploy-render--neon) · [Contributing](#contributing)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![A session: decisions with a flagged conflict and linked documents](.github/assets/session.png) **A session**: decisions, a flagged conflict, linked knowledge and tracked items | ![Catch-up brief for the person taking over](.github/assets/brief.png) **Catch-up brief** written by AI for the person taking over a private hand-over |
+| ![Ask Relay answering with a cited source](.github/assets/ask.png) **Ask Relay** answers only from what you may see, and cites it | ![Decision conflict: older vs newer decision](.github/assets/conflicts.png) **Decision conflict**: the older decision, the newer one and why AI flagged it |
+| ![Action items with counters and filters](.github/assets/items.png) **Action items** followed until closed with an outcome | ![Landing page with the demo sign-in](.github/assets/landing.png) **Landing page** and demo sign-in |
 
 ## Features
 
@@ -85,6 +95,43 @@ Action items follow their session, and **people always see their own items**, ev
 
 Try it: sign in as **Aisha** (Payments: 6 sessions, 14 docs), **Kavya** (Support: 4 sessions incl. her private 1-on-1, 8 docs, 0 conflicts because both conflicts involve a Payments-only decision), **Neha** (in both teams: 8 sessions), or **Rahul** / **Priya** (the only ones who see the private hand-over; only Rahul sees his private notes).
 
+## Architecture
+
+```mermaid
+flowchart LR
+  B["Browser<br/>React · Vite · Tailwind"] -- "/api + Bearer JWT" --> E
+
+  subgraph E["Express API (Node 22, TypeScript)"]
+    direction TB
+    M["request ID · access log · JWT auth"] --> R["routes.ts<br/>zod validation + access guards"]
+    R --> S["services<br/>sessions · items · recap · brief · knowledge · conflicts · ask"]
+    S --> A["access.ts<br/>who can see what"]
+    S --> AI["ai/ client<br/>timeout · schema check · retry · model fallback · cache"]
+  end
+
+  S -- Prisma --> DB[("PostgreSQL<br/>Neon")]
+  AI --> G["Google Gemini<br/>text + embeddings"]
+  S -. "JSON logs (pino)" .-> L["stdout + logs/app.log"]
+```
+
+**How a recap flows:** raw notes → AI draft (validated JSON, owners matched to real people, open items recognised) → **the user reviews and edits** → saved in one transaction → AI follow-ups: link items and decisions to the knowledge base, and check new decisions against earlier ones the same audience can see.
+
+```mermaid
+sequenceDiagram
+  actor U as User
+  participant API as Relay API
+  participant AI as Gemini
+  participant DB as Postgres
+  U->>API: paste notes → recap/draft
+  API->>AI: notes + participants + open items
+  AI-->>API: JSON draft (checked with zod, 1 retry)
+  API-->>U: editable draft
+  U->>API: recap/apply (reviewed)
+  API->>DB: summary, decisions, items + history (transaction)
+  API->>AI: link to knowledge · check decision conflicts
+  API->>DB: links + conflicts (only ids that were sent)
+```
+
 ## Tech stack
 
 | Layer | Choice |
@@ -126,7 +173,7 @@ Open http://localhost:5173. To run it the way production does (one port): `npm r
 
 ```bash
 cd server
-npm test          # 27 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
+npm test          # 35 tests: unit + API tests against the relay_test database (needs `npm run db:local`)
 npm run typecheck
 ```
 
@@ -139,7 +186,7 @@ Nine access-control tests check: no token → 401; a private session is a 404 fo
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | _(empty)_ | Free key from https://aistudio.google.com/apikey. Empty = AI off, app still works |
-| `GEMINI_MODEL` | `gemini-flash-lite-latest` | Text model for recap, brief, linking, conflicts, Ask. Chosen for speed (~2.5 s per call); `gemini-2.5-flash` is no longer offered to new API projects |
+| `GEMINI_MODEL` | `gemini-flash-lite-latest` | Text model(s) for recap, brief, linking, conflicts and Ask. Accepts a **comma-separated list in order of preference**: if a model is retired (404), rate-limited (429) or overloaded (503), the next one is tried. Default chosen for speed (~2.5 s per call) |
 | `GEMINI_EMBED_MODEL` | `gemini-embedding-001` | Embeddings (768 dims) for retrieval |
 | `AI_TIMEOUT_MS` | `25000` | Per-call timeout |
 
@@ -161,6 +208,8 @@ Nine access-control tests check: no token → 401; a private session is a 404 fo
 - Relative dates ("by tomorrow") resolve from the **meeting date**; "overdue" is computed by the server from the real date and passed to the model as a flag, never left to the model to judge.
 - **Verified live** against Gemini on 2026-10-30: a messy 7-line note produced the right decision, owners, due dates and quotes; it matched 2 of 3 tasks to existing open items; the conflict check flagged "switch to Cashfree" against the earlier "use Razorpay" (confidence 1.0). One Gemini `503 high demand` reply during testing was recovered by the automatic retry.
 - **Graceful degradation** when AI is off or failing: manual recap entry still works; the catch-up brief is built straight from the data (marked "AI unavailable"); knowledge linking falls back to keyword matching; the conflict check is skipped and the user is told.
+- **Model fallback:** `GEMINI_MODEL=a,b,c` tries the next model only for "this model can't serve you now" errors; other errors fail fast, since another model would fail the same way. Logged as `ai.model_fallback`.
+- **Answer cache:** briefs and Ask answers are cached for 10 minutes, keyed by a hash of the exact prompt. The prompt is built from the data, so any change to the data is a new key and a stale answer is never served. It makes repeat demo clicks instant and saves free-tier quota (`ai.cache_hit` in the logs).
 - The provider sits behind a two-method interface (`generateText`, `embed`), so switching to Claude or OpenAI is one new class.
 
 ## Data
@@ -275,7 +324,7 @@ Layout: `server/src/routes.ts` (HTTP + validation) → `server/src/services/*` (
 - **AI quality is not measured with a labelled set.** Outputs are schema-checked and reviewed by the user, but there is no accuracy number yet.
 - **No reminders are sent.** Follow-up happens through overdue/carried flags, the Action items board and briefs, not email or chat notifications.
 - **Gemini free tier allows 20 requests per day per model.** Past that, AI features fall back (data-only brief, keyword links, search-only Ask). A paid key or a second model removes the limit.
-- **Free hosting:** the Render free tier sleeps after ~15 min idle (first request ~30 s), and its disk is wiped on redeploy, so `logs/app.log` there is per-instance. In production you would ship logs to a log service.
+- **Free hosting:** the Render free tier sleeps after ~15 min idle; a GitHub Actions workflow (`keepalive.yml`) pings the health check every 10 minutes so the demo stays awake. The disk is wiped on redeploy, and its disk is wiped on redeploy, so `logs/app.log` there is per-instance. In production you would ship logs to a log service.
 - The AI recap and follow-ups run inside the request (a few seconds). A job queue would make this asynchronous.
 
 ## Docker

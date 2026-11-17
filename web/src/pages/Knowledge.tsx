@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type KnowledgeDoc, type Visibility } from '../api';
-import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, VisibilityBadge, VisibilityPicker, fmtDate } from '../ui';
-import { useMe } from '../App';
+import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, VisibilityBadge, VisibilityPicker } from '../ui';
+import { fmtDate } from '../format';
+import { useMe } from '../hooks';
 
 export default function KnowledgePage() {
   const qc = useQueryClient();
